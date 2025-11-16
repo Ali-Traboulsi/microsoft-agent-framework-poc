@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { agentsApi } from '../services/api';
 import { signalRService } from '../services/signalr';
 import { useStore } from '../store/store';
+import { MessageContent } from './MessageContent';
 
 type AgentName = 'InvestmentAdvisor' | 'PortfolioManager' | 'AccountServices' | 'ComplianceOfficer';
 
@@ -209,7 +210,7 @@ export const ChatInterface: React.FC = () => {
               {msg.sender === 'agent' && msg.agentName && (
                 <div className="text-xs font-medium mb-1 opacity-75">{msg.agentName}</div>
               )}
-              <div className="whitespace-pre-wrap">{msg.text}</div>
+              <MessageContent content={msg.text} isAgent={msg.sender === 'agent'} />
               <div className="text-xs mt-1 opacity-75">
                 {msg.timestamp.toLocaleTimeString()}
               </div>

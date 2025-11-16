@@ -2,6 +2,9 @@
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 
+/* Import highlight.js theme for code syntax highlighting */
+@import "highlight.js/styles/atom-one-dark.css";
+
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
@@ -17,4 +20,56 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+}
+
+/* Markdown content styling */
+.markdown-content {
+  @apply text-sm leading-relaxed;
+}
+
+.markdown-content > *:first-child {
+  @apply mt-0;
+}
+
+.markdown-content > *:last-child {
+  @apply mb-0;
+}
+
+/* Code blocks in markdown */
+.markdown-content pre {
+  @apply my-2 rounded-md overflow-hidden;
+}
+
+.markdown-content pre code {
+  @apply text-sm leading-relaxed;
+}
+
+/* Inline code in markdown */
+.markdown-content code:not(pre code) {
+  @apply bg-gray-200 text-gray-800 px-1.5 py-0.5 rounded text-xs font-mono;
+}
+
+/* Links in markdown */
+.markdown-content a {
+  @apply break-words;
+}
+
+/* Strikethrough (GFM) */
+.markdown-content del {
+  @apply opacity-70;
+}
+
+/* Task lists (GFM) */
+.markdown-content input[type="checkbox"] {
+  @apply mr-2;
+}
+
+/* Strong emphasis */
+.markdown-content strong {
+  @apply font-semibold;
+}
+
+/* Emphasis */
+.markdown-content em {
+  @apply italic;
 }

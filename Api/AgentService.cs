@@ -1,4 +1,3 @@
-using AgentFrameworkQuickStart.Api.DTOs;
 using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Tools;
 using Microsoft.Agents.AI;
