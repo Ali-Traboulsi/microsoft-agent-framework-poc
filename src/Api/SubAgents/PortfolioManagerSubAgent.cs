@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using AgentFrameworkQuickStart.Api.Abstractions;
@@ -13,6 +14,25 @@ namespace AgentFrameworkQuickStart.Api.SubAgents;
 /// </summary>
 public class PortfolioManagerSubAgent : ISubAgent
 {
+    // OpenTelemetry observability
+    private static readonly ActivitySource ActivitySource = new(
+        "InvestmentBanking.SubAgents.PortfolioManager",
+        "2.0.0"
+    );
+    private static readonly Meter Meter = new(
+        "InvestmentBanking.SubAgents.PortfolioManager",
+        "2.0.0"
+    );
+    private static readonly Counter<long> RequestCounter = Meter.CreateCounter<long>(
+        "subagent.requests",
+        description: "Number of requests handled"
+    );
+    private static readonly Histogram<double> RequestDuration = Meter.CreateHistogram<double>(
+        "subagent.request.duration",
+        unit: "ms",
+        description: "Duration of request handling"
+    );
+
     private readonly IChatClient _chatClient;
     private readonly PortfolioTools _portfolioTools;
     private readonly AccountTools _accountTools;
@@ -86,6 +106,13 @@ public class PortfolioManagerSubAgent : ISubAgent
         Dictionary<string, object>? context = null
     )
     {
+        using var activity = ActivitySource.StartActivity(
+            "PortfolioManagerSubAgent.HandleRequest",
+            ActivityKind.Internal
+        );
+        activity?.SetTag("subagent.name", Name);
+        activity?.SetTag("request.length", request.Length);
+
         var sw = Stopwatch.StartNew();
 
         try
@@ -96,6 +123,21 @@ public class PortfolioManagerSubAgent : ISubAgent
             var responseText = result.Messages.LastOrDefault()?.Text ?? "No response generated";
 
             sw.Stop();
+
+            // Record metrics
+            RequestCounter.Add(
+                1,
+                new KeyValuePair<string, object?>("subagent", Name),
+                new KeyValuePair<string, object?>("success", true)
+            );
+            RequestDuration.Record(
+                sw.ElapsedMilliseconds,
+                new KeyValuePair<string, object?>("subagent", Name)
+            );
+
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            activity?.SetTag("response.length", responseText.Length);
+            activity?.SetTag("duration_ms", sw.ElapsedMilliseconds);
 
             _logger.LogInformation(
                 "{SubAgent} completed in {Duration}ms",
@@ -116,6 +158,16 @@ public class PortfolioManagerSubAgent : ISubAgent
         catch (Exception ex)
         {
             sw.Stop();
+
+            // Record error metrics
+            RequestCounter.Add(
+                1,
+                new KeyValuePair<string, object?>("subagent", Name),
+                new KeyValuePair<string, object?>("success", false)
+            );
+
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            activity?.SetTag("error.type", ex.GetType().Name);
 
             _logger.LogError(
                 ex,
