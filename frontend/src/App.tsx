@@ -2,6 +2,7 @@ import React from 'react';
 import { AccountsView } from './components/AccountsView';
 import { ChatInterface } from './components/ChatInterface';
 import { FundsView } from './components/FundsView';
+import { MasterAgentChat } from './components/MasterAgentChat';
 import { PortfolioView } from './components/PortfolioView';
 import './index.css';
 import { useStore } from './store/store';
@@ -10,7 +11,8 @@ const App: React.FC = () => {
   const { activeTab, setActiveTab } = useStore();
 
   const tabs = [
-    { id: 'chat', label: 'Agent Chat', icon: '💬' },
+    { id: 'master', label: 'Master Agent', icon: '🤖' },
+    { id: 'chat', label: 'Individual Agents', icon: '💬' },
     { id: 'portfolios', label: 'Portfolios', icon: '💼' },
     { id: 'funds', label: 'Mutual Funds', icon: '📊' },
     { id: 'accounts', label: 'Accounts', icon: '🏦' },
@@ -54,6 +56,7 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 overflow-hidden max-w-7xl mx-auto w-full">
+        {activeTab === 'master' && <MasterAgentChat />}
         {activeTab === 'chat' && <ChatInterface />}
         {activeTab === 'portfolios' && <PortfolioView />}
         {activeTab === 'funds' && <FundsView />}

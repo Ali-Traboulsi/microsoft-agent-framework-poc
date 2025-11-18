@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using AgentFrameworkQuickStart.Api.Abstractions;
+using AgentFrameworkQuickStart.Api.Middleware;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
@@ -51,7 +52,7 @@ public class MasterOrchestrator : IMasterOrchestrator
         _subAgents = subAgents;
         _logger = logger;
         _subAgentLookup = subAgents.ToDictionary(sa => sa.Name, sa => sa);
-        _masterAgent = new Lazy<AIAgent>(CreateMasterAgent);
+        _masterAgent = new Lazy<AIAgent>(CreateMasterAgentWithMiddleware);
     }
 
     private AIAgent CreateMasterAgent()
@@ -131,6 +132,20 @@ public class MasterOrchestrator : IMasterOrchestrator
                 AIFunctionFactory.Create(GetAvailableSubAgentsAsString),
             ]
         );
+    }
+
+    /// <summary>
+    /// Create master agent with middleware for event tracking
+    /// </summary>
+    private AIAgent CreateMasterAgentWithMiddleware()
+    {
+        var baseAgent = CreateMasterAgent();
+
+        // Wrap agent with delegation event middleware
+        return baseAgent
+            .AsBuilder()
+            .Use(DelegationEventMiddleware.FunctionInvocationMiddleware)
+            .Build();
     }
 
     [Description("Delegate a request to a specific sub-agent specialist")]
@@ -430,6 +445,9 @@ public class MasterOrchestrator : IMasterOrchestrator
         activity?.SetTag("conversation.id", conversationId);
         activity?.SetTag("message.length", userMessage.Length);
 
+        // Set conversation ID for middleware to track events
+        DelegationEventMiddleware.CurrentConversationId = conversationId;
+
         _logger.LogInformation(
             "Processing streaming request for conversation {ConversationId}: {Message}",
             conversationId,
@@ -439,46 +457,193 @@ public class MasterOrchestrator : IMasterOrchestrator
         var fullResponse = new StringBuilder();
         var isInThinkingBlock = false;
         var chunkCount = 0;
+        var lastEventCheck = DateTime.UtcNow;
+        var hasSeenDelegation = false;
+        var hasStartedThinking = false;
 
-        await foreach (var chunk in _masterAgent.Value.RunStreamingAsync(userMessage))
+        try
         {
-            if (chunk.Text != null)
+            await foreach (var chunk in _masterAgent.Value.RunStreamingAsync(userMessage))
             {
-                fullResponse.Append(chunk.Text);
-                chunkCount++;
-
-                // Detect thinking blocks
-                if (chunk.Text.Contains("🤔"))
-                {
-                    isInThinkingBlock = true;
-                }
-
-                yield return new OrchestratorResponse
-                {
-                    Type = isInThinkingBlock ? ResponseType.Thinking : ResponseType.Content,
-                    Content = chunk.Text,
-                };
-
-                // End of thinking block
-                if (
-                    isInThinkingBlock && (chunk.Text.Contains("\n\n") || chunk.Text.Contains("---"))
+                // Check for new delegation events FIRST
+                while (
+                    DelegationEventMiddleware.TryGetNextEvent(
+                        conversationId,
+                        out var delegationEvent
+                    )
                 )
                 {
-                    isInThinkingBlock = false;
+                    hasSeenDelegation = true;
+                    isInThinkingBlock = false; // End thinking when delegation starts
+                    yield return ConvertDelegationEventToResponse(delegationEvent);
+                }
+
+                if (chunk.Text != null)
+                {
+                    fullResponse.Append(chunk.Text);
+                    chunkCount++;
+
+                    // Everything BEFORE delegation is thinking (agent's reasoning process)
+                    if (!hasSeenDelegation)
+                    {
+                        if (!hasStartedThinking)
+                        {
+                            isInThinkingBlock = true;
+                            hasStartedThinking = true;
+                        }
+                    }
+                    else
+                    {
+                        // Everything AFTER delegation is content (final response)
+                        isInThinkingBlock = false;
+                    }
+
+                    var responseType = isInThinkingBlock
+                        ? ResponseType.Thinking
+                        : ResponseType.Content;
+
+                    _logger.LogInformation(
+                        "Streaming chunk: Type={Type}, HasSeenDelegation={HasSeenDelegation}, ChunkPreview={Preview}",
+                        responseType,
+                        hasSeenDelegation,
+                        chunk.Text.Length > 50 ? chunk.Text[..50] + "..." : chunk.Text
+                    );
+
+                    yield return new OrchestratorResponse
+                    {
+                        Type = responseType,
+                        Content = chunk.Text,
+                    };
+                }
+
+                // Also check for events periodically during streaming
+                if ((DateTime.UtcNow - lastEventCheck).TotalMilliseconds > 100)
+                {
+                    while (
+                        DelegationEventMiddleware.TryGetNextEvent(
+                            conversationId,
+                            out var delegationEvent
+                        )
+                    )
+                    {
+                        yield return ConvertDelegationEventToResponse(delegationEvent);
+                    }
+                    lastEventCheck = DateTime.UtcNow;
                 }
             }
+
+            // Final check for any remaining events
+            while (
+                DelegationEventMiddleware.TryGetNextEvent(conversationId, out var delegationEvent)
+            )
+            {
+                yield return ConvertDelegationEventToResponse(delegationEvent);
+            }
+
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            activity?.SetTag("response.total_length", fullResponse.Length);
+            activity?.SetTag("response.chunk_count", chunkCount);
+
+            _logger.LogInformation(
+                "Streaming completed for conversation {ConversationId}",
+                conversationId
+            );
+
+            yield return new OrchestratorResponse
+            {
+                Type = ResponseType.Complete,
+                Content = "",
+                Metadata = new Dictionary<string, object>
+                {
+                    ["traceId"] = activity?.TraceId.ToString() ?? "",
+                    ["totalChunks"] = chunkCount,
+                    ["responseLength"] = fullResponse.Length,
+                },
+            };
         }
+        finally
+        {
+            // Cleanup
+            DelegationEventMiddleware.CleanupConversation(conversationId);
+            DelegationEventMiddleware.CurrentConversationId = null;
+        }
+    }
 
-        activity?.SetStatus(ActivityStatusCode.Ok);
-        activity?.SetTag("response.total_length", fullResponse.Length);
-        activity?.SetTag("response.chunk_count", chunkCount);
-
-        _logger.LogInformation(
-            "Streaming completed for conversation {ConversationId}",
-            conversationId
-        );
-
-        yield return new OrchestratorResponse { Type = ResponseType.Complete, Content = "" };
+    /// <summary>
+    /// Convert middleware delegation event to orchestrator response
+    /// </summary>
+    private OrchestratorResponse ConvertDelegationEventToResponse(DelegationEvent delegationEvent)
+    {
+        return delegationEvent.Type switch
+        {
+            DelegationEventType.SubAgentDelegationStart => new OrchestratorResponse
+            {
+                Type = ResponseType.SubAgentDelegation,
+                SubAgentName = delegationEvent.SubAgentName,
+                Content = $"🔄 Delegating to **{delegationEvent.SubAgentName}**...",
+                Metadata = new Dictionary<string, object>
+                {
+                    ["timestamp"] = delegationEvent.Timestamp,
+                    ["functionName"] = delegationEvent.FunctionName ?? "",
+                },
+            },
+            DelegationEventType.SubAgentDelegationComplete => new OrchestratorResponse
+            {
+                Type = ResponseType.SubAgentComplete,
+                SubAgentName = delegationEvent.SubAgentName,
+                Content = $"✅ **{delegationEvent.SubAgentName}** completed",
+                Metadata = new Dictionary<string, object>
+                {
+                    ["timestamp"] = delegationEvent.Timestamp,
+                    ["duration"] = (
+                        delegationEvent.Timestamp - (delegationEvent.Timestamp)
+                    ).TotalMilliseconds,
+                },
+            },
+            DelegationEventType.SubAgentDelegationError => new OrchestratorResponse
+            {
+                Type = ResponseType.SubAgentComplete,
+                SubAgentName = delegationEvent.SubAgentName,
+                Content = $"❌ **{delegationEvent.SubAgentName}** error: {delegationEvent.Error}",
+                Metadata = new Dictionary<string, object>
+                {
+                    ["timestamp"] = delegationEvent.Timestamp,
+                    ["error"] = delegationEvent.Error ?? "",
+                },
+            },
+            DelegationEventType.ToolExecutionStart => new OrchestratorResponse
+            {
+                Type = ResponseType.ToolExecution,
+                ToolName = delegationEvent.ToolName,
+                Content = $"🔧 Executing **{delegationEvent.ToolName}**...",
+                Metadata = new Dictionary<string, object>
+                {
+                    ["timestamp"] = delegationEvent.Timestamp,
+                },
+            },
+            DelegationEventType.ToolExecutionComplete => new OrchestratorResponse
+            {
+                Type = ResponseType.ToolExecution,
+                ToolName = delegationEvent.ToolName,
+                Content = $"✅ Tool **{delegationEvent.ToolName}** completed",
+                Metadata = new Dictionary<string, object>
+                {
+                    ["timestamp"] = delegationEvent.Timestamp,
+                },
+            },
+            DelegationEventType.ToolExecutionError => new OrchestratorResponse
+            {
+                Type = ResponseType.ToolExecution,
+                ToolName = delegationEvent.ToolName,
+                Content = $"❌ Tool **{delegationEvent.ToolName}** error: {delegationEvent.Error}",
+                Metadata = new Dictionary<string, object>
+                {
+                    ["timestamp"] = delegationEvent.Timestamp,
+                    ["error"] = delegationEvent.Error ?? "",
+                },
+            },
+            _ => new OrchestratorResponse { Type = ResponseType.Content, Content = "" },
+        };
     }
 }
 

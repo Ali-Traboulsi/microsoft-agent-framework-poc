@@ -1,0 +1,196 @@
+{
+  "info": {
+    "name": "Investment Banking Master Agent API",
+    "description": "Test collection for Master Agent with OpenTelemetry observability",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "master-agent-tests",
+    "version": "2.0.0"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Master Agent V2",
+      "item": [
+        {
+          "name": "Chat - Simple Query",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What mutual funds are available for investment?\",\n  \"conversationId\": \"postman-test-1\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "Simple query to test Master Agent delegation to InvestmentAdvisor sub-agent"
+          },
+          "response": []
+        },
+        {
+          "name": "Chat - Portfolio Creation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Create a balanced investment portfolio for me with growth and income funds\",\n  \"conversationId\": \"postman-test-2\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "Tests delegation to PortfolioManager sub-agent"
+          },
+          "response": []
+        },
+        {
+          "name": "Chat - Account Balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What is my current account balance?\",\n  \"conversationId\": \"postman-test-3\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "Tests delegation to AccountServices sub-agent"
+          },
+          "response": []
+        },
+        {
+          "name": "Chat - Multi-Agent Coordination",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Check my account balance, then create a diversified portfolio, and recommend the best performing mutual funds\",\n  \"conversationId\": \"postman-test-4\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "Tests multi-agent coordination - should delegate to multiple sub-agents"
+          },
+          "response": []
+        },
+        {
+          "name": "Chat - Compliance Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Assess the compliance risk of investing heavily in tech stocks\",\n  \"conversationId\": \"postman-test-5\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "Tests delegation to ComplianceOfficer sub-agent"
+          },
+          "response": []
+        },
+        {
+          "name": "Chat - Complex Investment Strategy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"I want to invest $50,000 for retirement in 20 years. Create a strategy with portfolio allocation, fund recommendations, and compliance review.\",\n  \"conversationId\": \"postman-test-6\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "Complex request requiring coordination of multiple sub-agents. Watch for orchestrator.delegation.duration metric!"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Available Sub-Agents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/agents",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "agents"]
+            },
+            "description": "Lists all available sub-agents and their capabilities"
+          },
+          "response": []
+        }
+      ],
+      "description": "Master Agent orchestrator endpoints (v2)"
+    },
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "API Root",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": ["{{baseUrl}}"],
+              "path": [""]
+            },
+            "description": "Get API information and available endpoints"
+          },
+          "response": []
+        }
+      ],
+      "description": "System information endpoints"
+    }
+  ]
+}

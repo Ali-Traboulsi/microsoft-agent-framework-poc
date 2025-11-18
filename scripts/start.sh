@@ -15,9 +15,12 @@ if [ -z "$OPENAI_API_KEY" ]; then
     exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 echo "Starting API Server..."
 echo
-cd "$(dirname "$0")"
+cd "$PROJECT_ROOT/src"
 dotnet run &
 API_PID=$!
 
@@ -27,7 +30,7 @@ sleep 10
 echo
 echo "Starting Frontend..."
 echo
-cd frontend
+cd "$PROJECT_ROOT/frontend"
 pnpm run dev &
 FRONTEND_PID=$!
 

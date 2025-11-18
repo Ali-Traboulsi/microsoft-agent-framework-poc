@@ -18,8 +18,8 @@ type AgentName = 'InvestmentAdvisor' | 'PortfolioManager' | 'AccountServices' | 
 
 interface AppState {
   // UI State
-  activeTab: 'chat' | 'portfolios' | 'funds' | 'accounts';
-  setActiveTab: (tab: 'chat' | 'portfolios' | 'funds' | 'accounts') => void;
+  activeTab: 'master' | 'chat' | 'portfolios' | 'funds' | 'accounts';
+  setActiveTab: (tab: 'master' | 'chat' | 'portfolios' | 'funds' | 'accounts') => void;
 
   // Chat State - Per Agent
   agentChats: Record<AgentName, AgentChat>;
@@ -55,7 +55,7 @@ const initialAgentChat: AgentChat = {
 
 export const useStore = create<AppState>((set) => ({
   // UI State
-  activeTab: 'chat',
+  activeTab: 'master',
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   // Chat State - Per Agent

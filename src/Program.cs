@@ -36,6 +36,10 @@ var enableAzureMonitor = !string.IsNullOrEmpty(
     builder.Configuration["ApplicationInsights:ConnectionString"]
 );
 
+// Control console output verbosity (set to false to reduce noise)
+var enableConsoleExporter = builder.Configuration.GetValue("OpenTelemetry:ConsoleExporter", true);
+var enableRuntimeMetrics = builder.Configuration.GetValue("OpenTelemetry:RuntimeMetrics", false); // Disabled by default - too verbose
+
 builder
     .Services.AddOpenTelemetry()
     .ConfigureResource(resource =>
@@ -88,7 +92,10 @@ builder
                 };
             })
             // Console exporter for development
-            .AddConsoleExporter();
+            .AddConsoleExporter(options =>
+            {
+                options.Targets = OpenTelemetry.Exporter.ConsoleExporterOutputTargets.Console;
+            });
 
         // Azure Monitor uses Azure SDK, not OTLP
     })
@@ -105,11 +112,19 @@ builder
             // ASP.NET Core runtime metrics
             .AddAspNetCoreInstrumentation()
             // HTTP client metrics
-            .AddHttpClientInstrumentation()
-            // .NET Runtime metrics
-            .AddRuntimeInstrumentation()
-            // Console exporter for development
-            .AddConsoleExporter();
+            .AddHttpClientInstrumentation();
+
+        // .NET Runtime metrics (verbose - enable only if needed)
+        if (enableRuntimeMetrics)
+        {
+            metrics.AddRuntimeInstrumentation();
+        }
+
+        // Console exporter for development
+        if (enableConsoleExporter)
+        {
+            metrics.AddConsoleExporter();
+        }
 
         // Azure Monitor uses Azure SDK, not OTLP
     });
@@ -132,12 +147,17 @@ if (enableAzureMonitor)
 }
 else
 {
+    Console.WriteLine($"ℹ️  OpenTelemetry configured for '{serviceName}' v{serviceVersion}");
     Console.WriteLine(
-        $"ℹ️  OpenTelemetry configured with console exporter for '{serviceName}' v{serviceVersion}"
+        $"   Console Exporter: {(enableConsoleExporter ? "Enabled (verbose)" : "Disabled")}"
+    );
+    Console.WriteLine(
+        $"   Runtime Metrics: {(enableRuntimeMetrics ? "Enabled" : "Disabled (too verbose)")}"
     );
     Console.WriteLine(
         "   To enable Azure Monitor, set ApplicationInsights:ConnectionString in configuration"
     );
+    Console.WriteLine("   To disable console output, set OpenTelemetry:ConsoleExporter=false");
 }
 
 // Add OpenAPI/Swagger
