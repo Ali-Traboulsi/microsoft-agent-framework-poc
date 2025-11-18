@@ -25,6 +25,8 @@ bld/
 *.pdb
 *.log
 appsettings.Development.json
+appsettings.Local.json
+appsettings.json
 *.dbmdl
 *.jfm
 TestResults/
