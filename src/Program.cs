@@ -199,6 +199,9 @@ builder.Services.AddScoped<ISubAgent, InvestmentAdvisorSubAgent>();
 builder.Services.AddScoped<ISubAgent, AccountServicesSubAgent>();
 builder.Services.AddScoped<ISubAgent, ComplianceOfficerSubAgent>();
 
+// Register helper classes for orchestration
+builder.Services.AddScoped<StructuredResponseHandler>();
+
 // Register Master Orchestrator (Scoped - one instance per request)
 builder.Services.AddScoped<IMasterOrchestrator, MasterOrchestrator>();
 
