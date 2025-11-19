@@ -197,7 +197,7 @@ export const MasterAgentChat: React.FC = () => {
     }
   };
 
-  const getMessageStyle = (type: ChatMessage['type']) => {
+  const getMessageStyle = (type: ChatMessage['type'], toolName?: string) => {
     switch (type) {
       case 'user':
         return 'bg-blue-500 text-white ml-auto';
@@ -208,7 +208,10 @@ export const MasterAgentChat: React.FC = () => {
       case 'delegation':
         return 'bg-blue-50 text-blue-900 border border-blue-200';
       case 'tool':
-        return 'bg-green-50 text-green-900 border border-green-200';
+        // Special styling for web search tool
+        return toolName === 'SearchWeb' 
+          ? 'bg-teal-50 text-teal-900 border border-teal-300 font-medium'
+          : 'bg-green-50 text-green-900 border border-green-200';
       case 'telemetry':
         return 'bg-gray-50 text-gray-700 border border-gray-300 font-mono text-xs';
       default:
@@ -216,14 +219,15 @@ export const MasterAgentChat: React.FC = () => {
     }
   };
 
-  const getMessageIcon = (type: ChatMessage['type']) => {
+  const getMessageIcon = (type: ChatMessage['type'], toolName?: string) => {
     switch (type) {
       case 'thinking':
         return '🤔';
       case 'delegation':
         return '🔄';
       case 'tool':
-        return '🔧';
+        // Show globe icon for web search, otherwise wrench
+        return toolName === 'SearchWeb' ? '🌐' : '🔧';
       case 'telemetry':
         return '📊';
       default:
@@ -302,7 +306,14 @@ export const MasterAgentChat: React.FC = () => {
             </div>
             <div>
               <span className="text-gray-600">Tools:</span>
-              <span className="ml-2 font-semibold">{telemetry.toolsUsed?.length || 0}</span>
+              <span className="ml-2 font-semibold">
+                {telemetry.toolsUsed?.length || 0}
+                {telemetry.toolsUsed?.includes('SearchWeb') && (
+                  <span className="ml-1 inline-flex items-center gap-1 bg-teal-100 text-teal-800 px-2 py-0.5 rounded text-xs">
+                    🌐 Web Search
+                  </span>
+                )}
+              </span>
             </div>
           </div>
         </div>
@@ -333,6 +344,32 @@ export const MasterAgentChat: React.FC = () => {
                 </div>
               ))}
             </div>
+            
+            <div className="mt-8 max-w-2xl mx-auto">
+              <p className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                <span>🌐</span>
+                <span>Web Search Capability Enabled</span>
+              </p>
+              <p className="text-xs text-gray-600 mb-3">
+                I can now search the web for real-time information to supplement my knowledge.
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  'Latest AI trends and news',
+                  'Current stock market performance',
+                  'Recent company announcements',
+                  'Economic indicators today'
+                ].map((example, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setInput(example)}
+                    className="bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-900 text-xs p-2 rounded transition-colors text-left"
+                  >
+                    🌐 {example}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
@@ -341,9 +378,9 @@ export const MasterAgentChat: React.FC = () => {
             key={msg.id}
             className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
           >
-            <div className={`max-w-3xl px-4 py-3 rounded-lg ${getMessageStyle(msg.type)}`}>
-              {getMessageIcon(msg.type) && (
-                <span className="inline-block mr-2">{getMessageIcon(msg.type)}</span>
+            <div className={`max-w-3xl px-4 py-3 rounded-lg ${getMessageStyle(msg.type, msg.toolName)}`}>
+              {getMessageIcon(msg.type, msg.toolName) && (
+                <span className="inline-block mr-2">{getMessageIcon(msg.type, msg.toolName)}</span>
               )}
               {msg.type === 'telemetry' ? (
                 <pre className="whitespace-pre-wrap overflow-x-auto">{msg.content}</pre>
@@ -396,7 +433,7 @@ export const MasterAgentChat: React.FC = () => {
           </button>
         </div>
         <p className="text-xs text-gray-500 mt-2">
-          💡 Try: "Show my portfolio and recommend tech funds" or "Create a balanced portfolio"
+          💡 Try: "Show my portfolio and recommend tech funds" or "What are the latest AI industry trends?" (web search)
         </p>
       </div>
     </div>

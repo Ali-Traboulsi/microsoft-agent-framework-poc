@@ -1,5 +1,7 @@
 namespace AgentFrameworkQuickStart.Api.Abstractions;
 
+using AgentFrameworkQuickStart.Api.DTOs;
+
 /// <summary>
 /// Orchestrates multiple sub-agents and coordinates their activities
 /// </summary>
@@ -29,6 +31,17 @@ public interface IMasterOrchestrator
     /// </summary>
     /// <returns>List of sub-agent descriptions</returns>
     List<SubAgentInfo> GetAvailableSubAgents();
+
+    /// <summary>
+    /// Process a user request and return structured JSON response
+    /// </summary>
+    /// <param name="userMessage">The user's request</param>
+    /// <param name="conversationId">Unique identifier for this conversation</param>
+    /// <returns>Structured JSON response conforming to StructuredAgentResponse schema</returns>
+    Task<StructuredOrchestratorResult> ProcessRequestStructuredAsync(
+        string userMessage,
+        string conversationId
+    );
 }
 
 /// <summary>
@@ -48,6 +61,18 @@ public class OrchestratorResult
 {
     public bool Success { get; init; }
     public required string Response { get; init; }
+    public List<string> SubAgentsUsed { get; init; } = new();
+    public long TotalDurationMs { get; init; }
+    public string? ErrorMessage { get; init; }
+}
+
+/// <summary>
+/// Structured result from the orchestrator
+/// </summary>
+public class StructuredOrchestratorResult
+{
+    public bool Success { get; init; }
+    public required StructuredAgentResponse StructuredResponse { get; init; }
     public List<string> SubAgentsUsed { get; init; } = new();
     public long TotalDurationMs { get; init; }
     public string? ErrorMessage { get; init; }

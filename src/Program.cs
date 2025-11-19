@@ -8,8 +8,6 @@ using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Tools;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Microsoft.Extensions.AI;
-using OpenAI;
-using OpenTelemetry;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -17,17 +15,22 @@ using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Get OpenAI API key from environment or configuration
+// Get OpenAI configuration from environment or configuration
 var openAiApiKey =
     Environment.GetEnvironmentVariable("OPENAI_API_KEY")
     ?? builder.Configuration["OpenAI:ApiKey"]
     ?? throw new InvalidOperationException(
-        "OpenAI API key not found. Set OPENAI_API_KEY environment variable."
+        "OpenAI API key not found. Set OPENAI_API_KEY environment variable or configure OpenAI:ApiKey."
     );
+
+Console.WriteLine($"🔧 Using OpenAI with model: gpt-4o-mini");
 
 // Add services to container
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
+
+// Add HttpClient for web search
+builder.Services.AddHttpClient();
 
 // Configure OpenTelemetry for comprehensive observability
 var serviceName = "InvestmentBankingAgents";
@@ -181,11 +184,12 @@ builder.Services.AddSingleton<InvestmentDataStore>();
 builder.Services.AddScoped<AccountTools>();
 builder.Services.AddScoped<PortfolioTools>();
 builder.Services.AddScoped<MutualFundTools>();
+builder.Services.AddScoped<WebSearchTools>();
 
-// Register IChatClient (Scoped - one instance per request)
+// Register IChatClient using OpenAI (Scoped - one instance per request)
 builder.Services.AddScoped<IChatClient>(sp =>
 {
-    var chatClient = new OpenAIClient(openAiApiKey).GetChatClient("gpt-4o-mini");
+    var chatClient = new OpenAI.Chat.ChatClient(model: "gpt-4o-mini", apiKey: openAiApiKey);
     return chatClient.AsIChatClient();
 });
 

@@ -54,6 +54,46 @@ public class MasterAgentController : ControllerBase
         }
     }
 
+    [HttpPost("chat/structured")]
+    public async Task<ActionResult<ApiResponse<StructuredOrchestratorResultDto>>> ChatStructured(
+        [FromBody] MasterChatRequest request
+    )
+    {
+        try
+        {
+            _logger.LogInformation(
+                "Master agent structured chat request: {Message}",
+                request.Message
+            );
+
+            var conversationId = request.ConversationId ?? Guid.NewGuid().ToString();
+            var result = await _orchestrator.ProcessRequestStructuredAsync(
+                request.Message,
+                conversationId
+            );
+
+            return Ok(
+                new ApiResponse<StructuredOrchestratorResultDto>(
+                    Success: true,
+                    Data: new StructuredOrchestratorResultDto
+                    {
+                        Success = result.Success,
+                        StructuredResponse = result.StructuredResponse,
+                        SubAgentsUsed = result.SubAgentsUsed,
+                        DurationMs = result.TotalDurationMs,
+                        ErrorMessage = result.ErrorMessage,
+                    },
+                    Error: null
+                )
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in master agent structured chat");
+            return Ok(new ApiResponse<StructuredOrchestratorResultDto>(false, null, ex.Message));
+        }
+    }
+
     [HttpGet("subagents")]
     public ActionResult<ApiResponse<List<SubAgentInfoDto>>> GetSubAgents()
     {
@@ -99,4 +139,13 @@ public class SubAgentInfoDto
     public required string Name { get; set; }
     public required string Domain { get; set; }
     public required string[] Capabilities { get; set; }
+}
+
+public class StructuredOrchestratorResultDto
+{
+    public bool Success { get; set; }
+    public required StructuredAgentResponse StructuredResponse { get; set; }
+    public List<string> SubAgentsUsed { get; set; } = new();
+    public long DurationMs { get; set; }
+    public string? ErrorMessage { get; set; }
 }

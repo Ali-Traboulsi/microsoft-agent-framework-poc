@@ -1,0 +1,71 @@
+### Test Web Search via Master Agent (v2 API)
+POST http://localhost:5000/api/v2/MasterAgent/chat
+Content-Type: application/json
+
+{
+  "message": "Search the web for the latest news about artificial intelligence",
+  "conversationId": "test-websearch-001"
+}
+
+### Test combining web search with financial advice
+POST http://localhost:5000/api/v2/MasterAgent/chat
+Content-Type: application/json
+
+{
+  "message": "What are the current trends in AI technology? Then recommend tech funds from our portfolio that might benefit.",
+  "conversationId": "test-websearch-002"
+}
+
+### Test financial query (should NOT use web search)
+POST http://localhost:5000/api/v2/MasterAgent/chat
+Content-Type: application/json
+
+{
+  "message": "Show me the details of portfolio PORT123",
+  "conversationId": "test-websearch-003"
+}
+
+### Test explicit web search request
+POST http://localhost:5000/api/v2/MasterAgent/chat
+Content-Type: application/json
+
+{
+  "message": "Can you search online for current interest rate news?",
+  "conversationId": "test-websearch-004"
+}
+
+### Test: Latest AI news (should trigger web search)
+POST http://localhost:5000/api/v2/MasterAgent/chat
+Content-Type: application/json
+
+{
+  "message": "What are the latest AI developments today?",
+  "conversationId": "test-websearch-005"
+}
+
+### Test: Stock market today (should trigger web search)
+POST http://localhost:5000/api/v2/MasterAgent/chat
+Content-Type: application/json
+
+{
+  "message": "What's happening in the stock market today?",
+  "conversationId": "test-websearch-006"
+}
+
+### Test: Company news (should trigger web search)
+POST http://localhost:5000/api/v2/MasterAgent/chat
+Content-Type: application/json
+
+{
+  "message": "Search for recent Microsoft earnings news",
+  "conversationId": "test-websearch-007"
+}
+
+### Test: General knowledge (should NOT trigger web search)
+POST http://localhost:5000/api/v2/MasterAgent/chat
+Content-Type: application/json
+
+{
+  "message": "What is diversification in investing?",
+  "conversationId": "test-websearch-008"
+}

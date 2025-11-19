@@ -1,11 +1,12 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using AgentFrameworkQuickStart.Api.Abstractions;
+using AgentFrameworkQuickStart.Api.DTOs;
 using AgentFrameworkQuickStart.Api.Middleware;
+using AgentFrameworkQuickStart.Tools;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
@@ -41,15 +42,18 @@ public class MasterOrchestrator : IMasterOrchestrator
     private readonly ILogger<MasterOrchestrator> _logger;
     private readonly Lazy<AIAgent> _masterAgent;
     private readonly Dictionary<string, ISubAgent> _subAgentLookup;
+    private readonly WebSearchTools _webSearchTools;
 
     public MasterOrchestrator(
         IChatClient chatClient,
         IEnumerable<ISubAgent> subAgents,
+        WebSearchTools webSearchTools,
         ILogger<MasterOrchestrator> logger
     )
     {
         _chatClient = chatClient;
         _subAgents = subAgents;
+        _webSearchTools = webSearchTools;
         _logger = logger;
         _subAgentLookup = subAgents.ToDictionary(sa => sa.Name, sa => sa);
         _masterAgent = new Lazy<AIAgent>(CreateMasterAgentWithMiddleware);
@@ -79,6 +83,7 @@ public class MasterOrchestrator : IMasterOrchestrator
    - Understand what the user is asking for
    - Identify which domain(s) are involved
    - Determine complexity (single vs. multi-agent task)
+   - Determine if current/real-time information from the web is needed
 
 2. **Think Out Loud (CRITICAL)**
    Before taking action, you MUST explain your reasoning:
@@ -88,12 +93,20 @@ public class MasterOrchestrator : IMasterOrchestrator
    - **Domain(s) Needed:** [Which area(s) does this involve?]
    - **Selected Sub-Agent(s):** [Which specialist(s) should handle this?]
    - **Approach:** [Will I delegate to one agent or coordinate multiple?]
+   - **Web Search Needed:** [Does this require current information from the internet?]
    
    This makes your decision-making transparent to users.
 
-3. **Delegate Intelligently**
+3. **Use Web Search When Needed**
+   - For questions requiring current/real-time information (news, current events, latest data)
+   - For topics outside financial services domain
+   - For market updates, economic news, or current trends
+   - When users explicitly ask for online/web information
+   
+4. **Delegate Intelligently**
    - Use DelegateToSubAgent for single-domain requests
    - Use DelegateToMultipleSubAgents for cross-domain requests
+   - Use SearchWeb for current information needs
    - Pass clear, specific instructions to each sub-agent
 
 4. **Coordinate and Synthesize**
@@ -112,6 +125,7 @@ public class MasterOrchestrator : IMasterOrchestrator
 - **Investment advice/fund recommendations** → InvestmentAdvisor
 - **Account operations/balances** → AccountServices
 - **Compliance/risk assessment** → ComplianceOfficer
+- **Current/real-time information** → SearchWeb (web search tool)
 - **Complex workflows** → Multiple agents in sequence or parallel
 
 **Response Quality:**
@@ -130,6 +144,7 @@ public class MasterOrchestrator : IMasterOrchestrator
                 AIFunctionFactory.Create(DelegateToSubAgent),
                 AIFunctionFactory.Create(DelegateToMultipleSubAgents),
                 AIFunctionFactory.Create(GetAvailableSubAgentsAsString),
+                AIFunctionFactory.Create(_webSearchTools.SearchWeb),
             ]
         );
     }
@@ -644,6 +659,263 @@ public class MasterOrchestrator : IMasterOrchestrator
             },
             _ => new OrchestratorResponse { Type = ResponseType.Content, Content = "" },
         };
+    }
+
+    public async Task<StructuredOrchestratorResult> ProcessRequestStructuredAsync(
+        string userMessage,
+        string conversationId
+    )
+    {
+        using var activity = ActivitySource.StartActivity(
+            "MasterOrchestrator.ProcessRequestStructured",
+            ActivityKind.Server
+        );
+        activity?.SetTag("conversation.id", conversationId);
+        activity?.SetTag("message.length", userMessage.Length);
+        activity?.SetTag("response.format", "structured_json");
+
+        var sw = Stopwatch.StartNew();
+
+        try
+        {
+            _logger.LogInformation(
+                "Processing structured request for conversation {ConversationId}: {Message}",
+                conversationId,
+                userMessage
+            );
+
+            // Create a specialized agent that returns JSON-only responses
+            var structuredAgent = _chatClient.CreateAIAgent(
+                name: "StructuredMasterAgent",
+                instructions: $@"You are a Master Agent that coordinates sub-agents and returns ONLY valid JSON responses.
+
+**Available Sub-Agents:**
+{string.Join("\n", _subAgents.Select(sa => $"- **{sa.Name}**: {sa.Domain}"))}
+
+**CRITICAL: JSON Format Rules**
+1. Return ONLY valid JSON (no markdown, no code blocks, no text before/after)
+2. Use null for any unused fields
+3. All numbers must be actual numbers, not strings (e.g., 75000 not ""75000"")
+4. Empty arrays should be [] not null
+5. referenceLinks MUST be an array of objects, not strings
+6. Follow this EXACT structure:
+
+{{
+  ""summary"": ""your summary here"",
+  ""referenceLinks"": [
+    {{
+      ""title"": ""Investment Advice Guide"",
+      ""url"": ""https://example.com/guide"",
+      ""source"": ""Web Search"",
+      ""snippet"": ""Brief description""
+    }}
+  ],
+  ""portfolios"": [
+    {{
+      ""portfolioId"": ""PORT001"",
+      ""portfolioName"": ""Portfolio Name"",
+      ""totalValue"": 75000,
+      ""holdings"": [
+        {{
+          ""fundSymbol"": ""GTGF"",
+          ""fundName"": ""Fund Name"",
+          ""shares"": 100,
+          ""currentValue"": 50000,
+          ""percentOfPortfolio"": 66.7
+        }}
+      ],
+      ""performance"": {{
+        ""totalReturn"": 5000,
+        ""returnPercentage"": 7.5,
+        ""period"": ""YTD""
+      }}
+    }}
+  ],
+  ""accounts"": null,
+  ""fundRecommendations"": null,
+  ""complianceAlerts"": null,
+  ""keyMetrics"": {{
+    ""totalValue"": 75000,
+    ""count"": 1
+  }},
+  ""suggestedActions"": [""Action 1"", ""Action 2""],
+  ""subAgentsUsed"": [""PortfolioManager""],
+  ""webSearchesExecuted"": [""best investment advice""]
+}}
+
+**Process:**
+1. Analyze the user's request
+2. Use DelegateToSubAgent to get data (e.g., for portfolios, delegate to PortfolioManager)
+3. If web search is needed, use SearchWeb tool
+4. Parse the sub-agent's response to extract data
+5. Format into the JSON structure above
+6. Return ONLY the JSON object
+
+**Important Rules:**
+- When you get portfolio data from PortfolioManager, extract the actual values
+- Convert any text data into the proper JSON types (numbers as numbers, not strings)
+- If holdings list is empty, use []
+- Track which sub-agents you used in the subAgentsUsed array
+- **CRITICAL**: referenceLinks must be an array of objects with title, url, source, snippet properties
+  - WRONG: ""referenceLinks"": [""https://example.com""]
+  - RIGHT: ""referenceLinks"": [{{""title"": ""Example"", ""url"": ""https://example.com"", ""source"": ""Web Search"", ""snippet"": ""Description""}}]
+- When SearchWeb returns results, convert them to proper referenceLink objects
+- Use empty array [] not null for referenceLinks if no web sources
+- **CRITICAL**: webSearchesExecuted must be an array of strings (the queries you searched)
+  - WRONG: ""webSearchesExecuted"": ""best investment advice""
+  - RIGHT: ""webSearchesExecuted"": [""best investment advice""]
+  - Use null if no web searches were performed
+- **CRITICAL**: subAgentsUsed must be an array of strings
+  - WRONG: ""subAgentsUsed"": ""PortfolioManager""
+  - RIGHT: ""subAgentsUsed"": [""PortfolioManager""]",
+                tools:
+                [
+                    AIFunctionFactory.Create(DelegateToSubAgent),
+                    AIFunctionFactory.Create(DelegateToMultipleSubAgents),
+                    AIFunctionFactory.Create(_webSearchTools.SearchWeb),
+                ]
+            );
+
+            // Run the agent
+            var result = await structuredAgent.RunAsync(userMessage);
+            var responseText = result.Messages.LastOrDefault()?.Text ?? "{}";
+
+            // Extract JSON from response (remove markdown code blocks if present)
+            var jsonResponse = responseText.Trim();
+            if (jsonResponse.StartsWith("```"))
+            {
+                var lines = jsonResponse.Split('\n');
+                jsonResponse = string.Join("\n", lines.Skip(1).Take(lines.Length - 2));
+            }
+
+            // Log the raw JSON for debugging
+            _logger.LogInformation(
+                "Raw JSON response (first 500 chars): {Json}",
+                jsonResponse.Length > 500 ? jsonResponse.Substring(0, 500) + "..." : jsonResponse
+            );
+
+            // Try to fix common JSON issues before parsing
+            try
+            {
+                // Parse as dynamic first to check structure
+                using var jsonDoc = JsonDocument.Parse(jsonResponse);
+                var root = jsonDoc.RootElement;
+
+                // Check if webSearchesExecuted is a string instead of array
+                if (
+                    root.TryGetProperty("webSearchesExecuted", out var webSearchProp)
+                    && webSearchProp.ValueKind == JsonValueKind.String
+                )
+                {
+                    var webSearchValue = webSearchProp.GetString();
+                    jsonResponse = jsonResponse.Replace(
+                        $"\"webSearchesExecuted\": \"{webSearchValue}\"",
+                        $"\"webSearchesExecuted\": [\"{webSearchValue}\"]"
+                    );
+                    _logger.LogWarning(
+                        "Fixed webSearchesExecuted from string to array: {Value}",
+                        webSearchValue
+                    );
+                }
+
+                // Check if subAgentsUsed is a string instead of array
+                if (
+                    root.TryGetProperty("subAgentsUsed", out var subAgentsProp)
+                    && subAgentsProp.ValueKind == JsonValueKind.String
+                )
+                {
+                    var subAgentsValue = subAgentsProp.GetString();
+                    jsonResponse = jsonResponse.Replace(
+                        $"\"subAgentsUsed\": \"{subAgentsValue}\"",
+                        $"\"subAgentsUsed\": [\"{subAgentsValue}\"]"
+                    );
+                    _logger.LogWarning(
+                        "Fixed subAgentsUsed from string to array: {Value}",
+                        subAgentsValue
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not pre-process JSON, will attempt direct parse");
+            }
+
+            // Parse the JSON response with more lenient options
+            var structuredResponse = JsonSerializer.Deserialize<StructuredAgentResponse>(
+                jsonResponse,
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    NumberHandling = System
+                        .Text
+                        .Json
+                        .Serialization
+                        .JsonNumberHandling
+                        .AllowReadingFromString,
+                    DefaultIgnoreCondition = System
+                        .Text
+                        .Json
+                        .Serialization
+                        .JsonIgnoreCondition
+                        .WhenWritingNull,
+                }
+            );
+
+            if (structuredResponse == null)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to deserialize response. JSON: {jsonResponse}"
+                );
+            }
+
+            sw.Stop();
+
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            activity?.SetTag("response.size_bytes", jsonResponse.Length);
+            activity?.SetTag("duration_ms", sw.ElapsedMilliseconds);
+
+            _logger.LogInformation(
+                "Structured request completed in {Duration}ms",
+                sw.ElapsedMilliseconds
+            );
+
+            return new StructuredOrchestratorResult
+            {
+                Success = true,
+                StructuredResponse = structuredResponse,
+                SubAgentsUsed = structuredResponse.SubAgentsUsed,
+                TotalDurationMs = sw.ElapsedMilliseconds,
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            activity?.AddTag("exception.type", ex.GetType().FullName);
+            activity?.AddTag("exception.message", ex.Message);
+
+            _logger.LogError(
+                ex,
+                "Error processing structured request for conversation {ConversationId}: {Error}",
+                conversationId,
+                ex.Message
+            );
+
+            return new StructuredOrchestratorResult
+            {
+                Success = false,
+                StructuredResponse = new StructuredAgentResponse
+                {
+                    Summary = $"An error occurred: {ex.Message}",
+                    ReferenceLinks = new List<ReferenceLink>(),
+                    SubAgentsUsed = new List<string>(),
+                },
+                ErrorMessage = ex.Message,
+                TotalDurationMs = sw.ElapsedMilliseconds,
+            };
+        }
     }
 }
 

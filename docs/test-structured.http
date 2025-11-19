@@ -1,0 +1,58 @@
+### Test Structured JSON Output Endpoint
+
+# Variables
+@baseUrl = http://localhost:5000/api/v2/MasterAgent
+
+### Test 1: Get Portfolio Data in Structured Format
+POST {{baseUrl}}/chat/structured HTTP/1.1
+Content-Type: application/json
+
+{
+  "message": "Show me all portfolios for John Doe",
+  "conversationId": "test-structured-1"
+}
+
+### Test 2: Get Investment Recommendations in Structured Format  
+POST {{baseUrl}}/chat/structured HTTP/1.1
+Content-Type: application/json
+
+{
+  "message": "I'm 35 years old with moderate risk tolerance. Recommend some growth funds for long-term investment.",
+  "conversationId": "test-structured-2"
+}
+
+### Test 3: Account Information in Structured Format
+POST {{baseUrl}}/chat/structured HTTP/1.1
+Content-Type: application/json
+
+{
+  "message": "What is my account balance for account ACC12345?",
+  "conversationId": "test-structured-3"
+}
+
+### Test 4: Web Search with Structured Format
+POST {{baseUrl}}/chat/structured HTTP/1.1
+Content-Type: application/json
+
+{
+  "message": "What are the latest AI trends in 2025?",
+  "conversationId": "test-structured-4"
+}
+
+### Test 5: Compliance Check in Structured Format
+POST {{baseUrl}}/chat/structured HTTP/1.1
+Content-Type: application/json
+
+{
+  "message": "Check if my portfolio meets SEC diversification requirements",
+  "conversationId": "test-structured-5"
+}
+
+### Test 6: Complex Multi-Agent Query in Structured Format
+POST {{baseUrl}}/chat/structured HTTP/1.1
+Content-Type: application/json
+
+{
+  "message": "I want to invest $50,000 from my account ACC54321. Show me my current portfolio, recommend suitable funds, and check compliance.",
+  "conversationId": "test-structured-6"
+}

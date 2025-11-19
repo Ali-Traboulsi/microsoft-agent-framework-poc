@@ -1,8 +1,9 @@
 using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Tools;
+using Azure;
+using Azure.AI.OpenAI;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OpenAI;
 
 namespace AgentFrameworkQuickStart.Api;
 
@@ -31,7 +32,24 @@ public class AgentService
         _accountTools = accountTools;
         _portfolioTools = portfolioTools;
         _fundTools = fundTools;
-        _chatClient = new OpenAIClient(apiKey).GetChatClient("gpt-4o-mini").AsIChatClient();
+
+        // Try to determine if this is an Azure OpenAI key or regular OpenAI key
+        // Azure OpenAI keys are typically 32 characters, OpenAI keys start with "sk-"
+        if (apiKey.StartsWith("sk-"))
+        {
+            // Regular OpenAI
+            _chatClient = new OpenAI.OpenAIClient(apiKey)
+                .GetChatClient("gpt-4o-mini")
+                .AsIChatClient();
+        }
+        else
+        {
+            // Azure OpenAI - use the Azure AI Foundry endpoint
+            var endpoint = "https://snbc-resource.services.ai.azure.com/api/projects/snbc";
+            var credential = new AzureKeyCredential(apiKey);
+            var azureClient = new AzureOpenAIClient(new Uri(endpoint), credential);
+            _chatClient = azureClient.GetChatClient("gpt-4o-mini").AsIChatClient();
+        }
     }
 
     public AIAgent GetPortfolioAgent()
