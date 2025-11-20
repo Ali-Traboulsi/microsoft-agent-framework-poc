@@ -23,11 +23,16 @@ var openAiApiKey =
         "OpenAI API key not found. Set OPENAI_API_KEY environment variable or configure OpenAI:ApiKey."
     );
 
-Console.WriteLine($"🔧 Using OpenAI with model: gpt-4o-mini");
+Console.WriteLine($"🔧 Using OpenAI with model: gpt-4o (with vision support)");
 
 // Add services to container
 builder.Services.AddControllers();
-builder.Services.AddSignalR();
+builder.Services.AddSignalR(options =>
+{
+    // Increase message size limit for multimodal content (base64-encoded files)
+    // Default is 32KB, increase to 100MB to support large audio/image files
+    options.MaximumReceiveMessageSize = 100 * 1024 * 1024; // 100MB
+});
 
 // Add HttpClient for web search
 builder.Services.AddHttpClient();
@@ -180,6 +185,9 @@ builder.Services.AddSwaggerGen(c =>
 // Register data store (Singleton - shared across all requests)
 builder.Services.AddSingleton<InvestmentDataStore>();
 
+// Register audio transcription service (Scoped)
+builder.Services.AddHttpClient<AudioTranscriptionService>();
+
 // Register tools (Scoped - one instance per request)
 builder.Services.AddScoped<AccountTools>();
 builder.Services.AddScoped<PortfolioTools>();
@@ -189,7 +197,7 @@ builder.Services.AddScoped<WebSearchTools>();
 // Register IChatClient using OpenAI (Scoped - one instance per request)
 builder.Services.AddScoped<IChatClient>(sp =>
 {
-    var chatClient = new OpenAI.Chat.ChatClient(model: "gpt-4o-mini", apiKey: openAiApiKey);
+    var chatClient = new OpenAI.Chat.ChatClient(model: "gpt-4o", apiKey: openAiApiKey);
     return chatClient.AsIChatClient();
 });
 

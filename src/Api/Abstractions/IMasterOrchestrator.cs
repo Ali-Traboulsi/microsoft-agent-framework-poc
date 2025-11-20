@@ -42,6 +42,28 @@ public interface IMasterOrchestrator
         string userMessage,
         string conversationId
     );
+
+    /// <summary>
+    /// Process a multi-modal request (text, images, audio, files)
+    /// </summary>
+    /// <param name="contents">List of AIContent items (text, images, audio, URIs)</param>
+    /// <param name="conversationId">Unique identifier for this conversation</param>
+    /// <returns>The orchestrated response</returns>
+    Task<OrchestratorResult> ProcessMultiModalRequestAsync(
+        List<Microsoft.Extensions.AI.AIContent> contents,
+        string conversationId
+    );
+
+    /// <summary>
+    /// Process a multi-modal request with streaming response
+    /// </summary>
+    /// <param name="contents">List of AIContent items (text, images, audio, URIs)</param>
+    /// <param name="conversationId">Unique identifier for this conversation</param>
+    /// <returns>Stream of orchestrator responses</returns>
+    IAsyncEnumerable<OrchestratorResponse> ProcessMultiModalRequestStreamingAsync(
+        List<Microsoft.Extensions.AI.AIContent> contents,
+        string conversationId
+    );
 }
 
 /// <summary>
@@ -119,6 +141,11 @@ public enum ResponseType
     /// Sub-agent has completed its work
     /// </summary>
     SubAgentComplete,
+
+    /// <summary>
+    /// Audio transcription result
+    /// </summary>
+    Transcription,
 
     /// <summary>
     /// Processing is complete

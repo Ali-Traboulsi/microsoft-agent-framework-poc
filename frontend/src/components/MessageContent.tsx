@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -8,10 +8,157 @@ interface MessageContentProps {
   isAgent: boolean;
 }
 
+// Try to detect and parse structured content
+function tryParseStructured(content: string): any | null {
+  try {
+    // Check if content contains JSON blocks
+    const jsonMatch = content.match(/```json\s*\n([\s\S]*?)\n```/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[1]);
+    }
+
+    // Check if entire content is JSON
+    if (content.trim().startsWith('{') || content.trim().startsWith('[')) {
+      return JSON.parse(content);
+    }
+
+    // Check for audio transcription format
+    if (content.includes('[Audio transcription from')) {
+      const match = content.match(/\[Audio transcription from (.+?)\]: (.+?)(?:\n\n(.+))?$/s);
+      if (match) {
+        return {
+          type: 'audio-transcription',
+          filename: match[1],
+          transcript: match[2],
+          analysis: match[3]
+        };
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Render structured data as cards
+const StructuredDataCard: React.FC<{ data: any }> = ({ data }) => {
+  const [expanded, setExpanded] = useState(true);
+
+  // Handle audio transcription
+  if (data.type === 'audio-transcription') {
+    return (
+      <div className="space-y-3">
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-2xl">🎵</span>
+            <div className="flex-1">
+              <div className="font-semibold text-purple-900">Audio Transcription</div>
+              <div className="text-sm text-purple-700">{data.filename}</div>
+            </div>
+          </div>
+          <div className="bg-white rounded p-3 text-sm text-gray-700 italic border border-purple-100">
+            "{data.transcript}"
+          </div>
+        </div>
+        {data.analysis && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="font-semibold text-blue-900 mb-2">AI Analysis</div>
+            <div className="text-sm text-gray-700">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {data.analysis}
+              </ReactMarkdown>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Handle arrays
+  if (Array.isArray(data)) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium text-gray-700">
+            Array ({data.length} items)
+          </span>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-xs text-blue-600 hover:text-blue-800"
+          >
+            {expanded ? 'Collapse' : 'Expand'}
+          </button>
+        </div>
+        {expanded && (
+          <div className="space-y-2">
+            {data.map((item, idx) => (
+              <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                <StructuredDataCard data={item} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Handle objects
+  if (typeof data === 'object' && data !== null) {
+    const keys = Object.keys(data);
+    
+    return (
+      <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-4 border border-gray-200 shadow-sm">
+        <div className="space-y-2">
+          {keys.map((key) => {
+            const value = data[key];
+            const isNested = typeof value === 'object' && value !== null;
+            
+            return (
+              <div key={key} className="flex gap-3">
+                <div className="flex-shrink-0 font-semibold text-gray-700 min-w-[120px]">
+                  {key}:
+                </div>
+                <div className="flex-1">
+                  {isNested ? (
+                    <StructuredDataCard data={value} />
+                  ) : (
+                    <span className="text-gray-900">
+                      {typeof value === 'boolean' ? (
+                        value ? '✅ True' : '❌ False'
+                      ) : (
+                        String(value)
+                      )}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // Fallback for primitives
+  return <span className="text-gray-900">{String(data)}</span>;
+};
+
 export const MessageContent: React.FC<MessageContentProps> = ({ content, isAgent }) => {
   if (!isAgent) {
     // User messages are plain text
     return <div className="whitespace-pre-wrap">{content}</div>;
+  }
+
+  // Try to detect structured content
+  const structured = tryParseStructured(content);
+  
+  if (structured) {
+    return (
+      <div className="space-y-3">
+        <StructuredDataCard data={structured} />
+      </div>
+    );
   }
 
   // Agent messages support markdown

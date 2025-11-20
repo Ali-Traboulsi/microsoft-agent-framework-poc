@@ -1,0 +1,251 @@
+{
+  "info": {
+    "name": "Multi-Modal Master Agent Tests",
+    "description": "Test collection for multi-modal chat API (images, audio, documents)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Simple Red Pixel Test",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"What color is this image? Please describe what you see.\",\n  \"contents\": [\n    {\n      \"type\": \"image\",\n      \"data\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==\",\n      \"mediaType\": \"image/png\"\n    }\n  ],\n  \"conversationId\": \"test-red-pixel-1\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/{{apiVersion}}/MasterAgent/chat/multimodal",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "{{apiVersion}}", "MasterAgent", "chat", "multimodal"]
+        },
+        "description": "Simple test with a 1x1 red pixel PNG image. This is the fastest way to verify the multi-modal endpoint is working."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Blue Pixel Test",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"What color is this image?\",\n  \"contents\": [\n    {\n      \"type\": \"image\",\n      \"data\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==\",\n      \"mediaType\": \"image/png\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/{{apiVersion}}/MasterAgent/chat/multimodal",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "{{apiVersion}}", "MasterAgent", "chat", "multimodal"]
+        },
+        "description": "Test with a blue pixel image."
+      },
+      "response": []
+    },
+    {
+      "name": "3. Green Pixel Test",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"This is a financial indicator. What does this color typically mean in dashboards?\",\n  \"contents\": [\n    {\n      \"type\": \"image\",\n      \"data\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==\",\n      \"mediaType\": \"image/png\",\n      \"fileName\": \"indicator.png\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/{{apiVersion}}/MasterAgent/chat/multimodal",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "{{apiVersion}}", "MasterAgent", "chat", "multimodal"]
+        },
+        "description": "Test with investment context - green indicator."
+      },
+      "response": []
+    },
+    {
+      "name": "4. Text Only Request",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"contents\": [\n    {\n      \"type\": \"text\",\n      \"text\": \"What are the best investment strategies for a balanced portfolio?\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/{{apiVersion}}/MasterAgent/chat/multimodal",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "{{apiVersion}}", "MasterAgent", "chat", "multimodal"]
+        },
+        "description": "Test with text-only content (no images). The multi-modal endpoint should handle this gracefully."
+      },
+      "response": []
+    },
+    {
+      "name": "5. Mixed Content (Text + Image)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"contents\": [\n    {\n      \"type\": \"text\",\n      \"text\": \"I'm analyzing a portfolio indicator.\"\n    },\n    {\n      \"type\": \"image\",\n      \"data\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==\",\n      \"mediaType\": \"image/png\",\n      \"fileName\": \"indicator.png\"\n    },\n    {\n      \"type\": \"text\",\n      \"text\": \"What investment action should I take based on this color?\"\n    }\n  ],\n  \"conversationId\": \"mixed-content-test\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/{{apiVersion}}/MasterAgent/chat/multimodal",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "{{apiVersion}}", "MasterAgent", "chat", "multimodal"]
+        },
+        "description": "Test with multiple content items: text, image, text."
+      },
+      "response": []
+    },
+    {
+      "name": "6. Multiple Images",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"Compare these three indicators and provide analysis.\",\n  \"contents\": [\n    {\n      \"type\": \"image\",\n      \"data\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==\",\n      \"mediaType\": \"image/png\",\n      \"fileName\": \"indicator_red.png\"\n    },\n    {\n      \"type\": \"image\",\n      \"data\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==\",\n      \"mediaType\": \"image/png\",\n      \"fileName\": \"indicator_green.png\"\n    },\n    {\n      \"type\": \"image\",\n      \"data\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==\",\n      \"mediaType\": \"image/png\",\n      \"fileName\": \"indicator_blue.png\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/{{apiVersion}}/MasterAgent/chat/multimodal",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "{{apiVersion}}", "MasterAgent", "chat", "multimodal"]
+        },
+        "description": "Test with three different colored indicators."
+      },
+      "response": []
+    },
+    {
+      "name": "7. Image from URI (External URL)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"Analyze this image from the web\",\n  \"contents\": [\n    {\n      \"type\": \"uri\",\n      \"uri\": \"https://via.placeholder.com/150/FF0000/FFFFFF?text=Portfolio\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/{{apiVersion}}/MasterAgent/chat/multimodal",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "{{apiVersion}}", "MasterAgent", "chat", "multimodal"]
+        },
+        "description": "Test with image URL (placeholder.com). Note: requires internet access and model support for URL fetching."
+      },
+      "response": []
+    },
+    {
+      "name": "8. Error Test - Empty Contents",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"This should fail\",\n  \"contents\": []\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/{{apiVersion}}/MasterAgent/chat/multimodal",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "{{apiVersion}}", "MasterAgent", "chat", "multimodal"]
+        },
+        "description": "Negative test: empty contents array should return error."
+      },
+      "response": []
+    },
+    {
+      "name": "9. Error Test - Invalid Image",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"This should fail\",\n  \"contents\": [\n    {\n      \"type\": \"image\",\n      \"mediaType\": \"image/png\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/{{apiVersion}}/MasterAgent/chat/multimodal",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "{{apiVersion}}", "MasterAgent", "chat", "multimodal"]
+        },
+        "description": "Negative test: image without data or uri should return validation error."
+      },
+      "response": []
+    },
+    {
+      "name": "10. YOUR CUSTOM IMAGE HERE",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"Analyze this investment chart and provide recommendations\",\n  \"contents\": [\n    {\n      \"type\": \"image\",\n      \"data\": \"PASTE_YOUR_BASE64_IMAGE_HERE\",\n      \"mediaType\": \"image/png\",\n      \"fileName\": \"my_chart.png\"\n    }\n  ],\n  \"conversationId\": \"custom-test-{{$timestamp}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/{{apiVersion}}/MasterAgent/chat/multimodal",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "{{apiVersion}}", "MasterAgent", "chat", "multimodal"]
+        },
+        "description": "Template for your own images. Replace PASTE_YOUR_BASE64_IMAGE_HERE with your base64 encoded image. Use https://www.base64-image.de/ to convert your image."
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "apiVersion",
+      "value": "v2",
+      "type": "string"
+    }
+  ]
+}

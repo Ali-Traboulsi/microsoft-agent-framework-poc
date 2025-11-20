@@ -603,6 +603,155 @@ public class MasterOrchestrator : IMasterOrchestrator
             DelegateToMultipleSubAgents
         );
     }
+
+    public async Task<OrchestratorResult> ProcessMultiModalRequestAsync(
+        List<AIContent> contents,
+        string conversationId
+    )
+    {
+        using var activity = ActivitySource.StartActivity(
+            "MasterOrchestrator.ProcessMultiModalRequest",
+            ActivityKind.Server
+        );
+        activity?.SetTag("conversation.id", conversationId);
+        activity?.SetTag("content.count", contents.Count);
+        activity?.SetTag("content.types", string.Join(",", contents.Select(c => c.GetType().Name)));
+
+        var sw = Stopwatch.StartNew();
+
+        try
+        {
+            _logger.LogInformation(
+                "Processing multi-modal request for conversation {ConversationId} with {ContentCount} content items",
+                conversationId,
+                contents.Count
+            );
+
+            // Create chat message with all content types
+            var chatMessage = new ChatMessage(ChatRole.User, contents);
+
+            // Run the agent with multi-modal content
+            var result = await _masterAgent.Value.RunAsync(chatMessage);
+            var responseText = result.Messages.LastOrDefault()?.Text ?? "No response generated.";
+
+            sw.Stop();
+
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            activity?.SetTag("duration_ms", sw.ElapsedMilliseconds);
+
+            _logger.LogInformation(
+                "Multi-modal request completed in {Duration}ms for conversation {ConversationId}",
+                sw.ElapsedMilliseconds,
+                conversationId
+            );
+
+            return new OrchestratorResult
+            {
+                Success = true,
+                Response = responseText,
+                SubAgentsUsed = new List<string>(), // Will be populated by middleware events
+                TotalDurationMs = sw.ElapsedMilliseconds,
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            activity?.AddTag("exception.type", ex.GetType().FullName);
+            activity?.AddTag("exception.message", ex.Message);
+
+            _logger.LogError(
+                ex,
+                "Error processing multi-modal request for conversation {ConversationId}: {Error}",
+                conversationId,
+                ex.Message
+            );
+
+            return new OrchestratorResult
+            {
+                Success = false,
+                Response = $"Error processing multi-modal request: {ex.Message}",
+                ErrorMessage = ex.Message,
+                TotalDurationMs = sw.ElapsedMilliseconds,
+            };
+        }
+    }
+
+    public async IAsyncEnumerable<OrchestratorResponse> ProcessMultiModalRequestStreamingAsync(
+        List<AIContent> contents,
+        string conversationId
+    )
+    {
+        using var activity = ActivitySource.StartActivity(
+            "MasterOrchestrator.ProcessMultiModalRequestStreaming",
+            ActivityKind.Server
+        );
+        activity?.SetTag("conversation.id", conversationId);
+        activity?.SetTag("content.count", contents.Count);
+        activity?.SetTag("content.types", string.Join(",", contents.Select(c => c.GetType().Name)));
+
+        _logger.LogInformation(
+            "Processing streaming multi-modal request for conversation {ConversationId} with {ContentCount} content items",
+            conversationId,
+            contents.Count
+        );
+
+        var contentBuilder = new StringBuilder();
+        var startTime = Stopwatch.GetTimestamp();
+
+        // Create chat message with all content types
+        var chatMessage = new ChatMessage(ChatRole.User, contents);
+
+        // Stream the agent's response
+        await foreach (var update in _masterAgent.Value.RunStreamingAsync(chatMessage))
+        {
+            if (update.Contents is { Count: > 0 })
+            {
+                foreach (var contentItem in update.Contents)
+                {
+                    if (contentItem is TextContent textContent)
+                    {
+                        contentBuilder.Append(textContent.Text);
+
+                        yield return new OrchestratorResponse
+                        {
+                            Type = ResponseType.Content,
+                            Content = textContent.Text,
+                            Metadata = new Dictionary<string, object>
+                            {
+                                ["timestamp"] = DateTime.UtcNow,
+                                ["isStreaming"] = true,
+                            },
+                        };
+                    }
+                }
+            }
+        }
+
+        var elapsedMs = Stopwatch.GetElapsedTime(startTime).TotalMilliseconds;
+
+        activity?.SetStatus(ActivityStatusCode.Ok);
+        activity?.SetTag("duration_ms", elapsedMs);
+
+        _logger.LogInformation(
+            "Multi-modal streaming request completed in {Duration}ms for conversation {ConversationId}",
+            elapsedMs,
+            conversationId
+        );
+
+        yield return new OrchestratorResponse
+        {
+            Type = ResponseType.Complete,
+            Content = contentBuilder.ToString(),
+            Metadata = new Dictionary<string, object>
+            {
+                ["timestamp"] = DateTime.UtcNow,
+                ["totalDurationMs"] = elapsedMs,
+                ["contentCount"] = contents.Count,
+            },
+        };
+    }
 }
 
 /// <summary>

@@ -1,15 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { masterAgentService } from '../services/masterAgent';
+import { FileUpload, UploadedFile } from './FileUpload';
 import { MessageContent } from './MessageContent';
 
 interface ChatMessage {
   id: string;
-  type: 'user' | 'agent' | 'thinking' | 'delegation' | 'tool' | 'telemetry';
+  type: 'user' | 'agent' | 'thinking' | 'delegation' | 'tool' | 'telemetry' | 'multimodal' | 'transcription';
   content: string;
   timestamp: Date;
   subAgentName?: string;
   toolName?: string;
   metadata?: Record<string, any>;
+  files?: UploadedFile[]; // For displaying user's uploaded files
 }
 
 interface TelemetryData {
@@ -27,6 +29,9 @@ export const MasterAgentChat: React.FC = () => {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetryData>({});
   const [showTelemetry, setShowTelemetry] = useState(true);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [showFileUpload, setShowFileUpload] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const conversationId = useRef(`conv-${Date.now()}`);
 
@@ -56,14 +61,196 @@ export const MasterAgentChat: React.FC = () => {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || isStreaming) return;
+    if ((!input.trim() && uploadedFiles.length === 0) || isStreaming) return;
 
-    const userMessage = input.trim();
-    setInput('');
+    const userMessage = input.trim() || 'Analyze these files';
+    const filesToSend = [...uploadedFiles];
     
-    // Add user message
-    addMessage({ type: 'user', content: userMessage });
+    setInput('');
+    setUploadedFiles([]);
+    setShowFileUpload(false);
+    
+    // Add user message with file attachments
+    addMessage({ 
+      type: 'user', 
+      content: userMessage,
+      files: filesToSend 
+    });
 
+    // If files are attached, use multimodal API
+    if (filesToSend.length > 0) {
+      await handleMultiModalSend(userMessage, filesToSend);
+      return;
+    }
+
+    // Otherwise use regular streaming chat
+    await handleStreamingChat(userMessage);
+  };
+
+  const handleMultiModalSend = async (userMessage: string, files: UploadedFile[]) => {
+    // Use streaming approach for multimodal to get full master orchestration
+    const requestStart = Date.now();
+    const delegationsUsed: string[] = [];
+    const toolsUsed: string[] = [];
+
+    setIsStreaming(true);
+    let thinkingMessageId: string | null = null;
+    let accumulatedThinking = '';
+
+    try {
+      // Convert files to base64 for streaming
+      const fileDataPromises = files.map(async (uploadedFile) => {
+        const buffer = await uploadedFile.file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        
+        // Convert to base64 in chunks to avoid stack overflow
+        let binary = '';
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          const chunk = bytes.slice(i, i + chunkSize);
+          binary += String.fromCharCode(...chunk);
+        }
+        const base64 = btoa(binary);
+        
+        const mediaType = uploadedFile.file.type || 'application/octet-stream';
+        
+        // Determine content type based on media type
+        let contentType: 'image' | 'audio' | 'file' = 'file';
+        if (mediaType.startsWith('image/')) {
+          contentType = 'image';
+        } else if (mediaType.startsWith('audio/')) {
+          contentType = 'audio';
+        }
+        
+        return {
+          Type: contentType,
+          Data: `data:${mediaType};base64,${base64}`,
+          MediaType: mediaType,
+          FileName: uploadedFile.file.name
+        };
+      });
+
+      const fileContents = await Promise.all(fileDataPromises);
+
+      // Add text content if message provided
+      const contents = [];
+      if (userMessage.trim()) {
+        contents.push({
+          Type: 'text' as const,
+          Text: userMessage
+        });
+      }
+      contents.push(...fileContents);
+
+      // Use streaming multimodal endpoint
+      for await (const chunk of masterAgentService.chatStreamMultiModal(contents, conversationId.current)) {
+        if (chunk.isComplete) {
+          const duration = Date.now() - requestStart;
+          setTelemetry({
+            duration,
+            delegationCount: delegationsUsed.length,
+            subAgentsUsed: [...new Set(delegationsUsed)],
+            toolsUsed: [...new Set(toolsUsed)],
+            traceId: chunk.metadata?.traceId
+          });
+
+          if (showTelemetry) {
+            addMessage({
+              type: 'telemetry',
+              content: JSON.stringify({
+                duration,
+                delegations: delegationsUsed.length,
+                subAgents: [...new Set(delegationsUsed)],
+                tools: toolsUsed.length,
+                traceId: chunk.metadata?.traceId?.substring(0, 8)
+              }, null, 2)
+            });
+          }
+          break;
+        }
+
+        switch (chunk.type) {
+          case 'Transcription':
+            // Display transcription in a special card before AI analysis
+            addMessage({
+              type: 'transcription',
+              content: chunk.content || '',
+              metadata: chunk.metadata || undefined
+            });
+            break;
+
+          case 'Thinking':
+            accumulatedThinking += chunk.content || '';
+            if (!thinkingMessageId) {
+              const newId = `msg-${Date.now()}-${Math.random()}`;
+              thinkingMessageId = newId;
+              setMessages(prev => [...prev, {
+                id: newId,
+                type: 'thinking',
+                content: '🤔 ' + accumulatedThinking,
+                timestamp: new Date()
+              }]);
+            } else {
+              setMessages(prev => prev.map(msg =>
+                msg.id === thinkingMessageId
+                  ? { ...msg, content: '🤔 ' + accumulatedThinking }
+                  : msg
+              ));
+            }
+            break;
+
+          case 'SubAgentDelegation':
+            if (chunk.subAgentName) {
+              delegationsUsed.push(chunk.subAgentName);
+              addMessage({
+                type: 'delegation',
+                content: `Delegating to ${chunk.subAgentName}...`,
+                subAgentName: chunk.subAgentName
+              });
+            }
+            break;
+
+          case 'ToolCall':
+            if (chunk.toolName) {
+              toolsUsed.push(chunk.toolName);
+              addMessage({
+                type: 'tool',
+                content: chunk.content || `Using tool: ${chunk.toolName}`,
+                toolName: chunk.toolName
+              });
+            }
+            break;
+
+          case 'Content':
+            if (chunk.content) {
+              addMessage({
+                type: 'multimodal',
+                content: chunk.content
+              });
+            }
+            break;
+
+          case 'Error':
+            addMessage({
+              type: 'agent',
+              content: `❌ Error: ${chunk.content}`
+            });
+            break;
+        }
+      }
+
+    } catch (error: any) {
+      console.error('Multimodal streaming error:', error);
+      addMessage({
+        type: 'agent',
+        content: `❌ Error: ${error.message}`
+      });
+    } finally {
+      setIsStreaming(false);
+    }
+  };
+
+  const handleStreamingChat = async (userMessage: string) => {
     // Reset telemetry
     const requestStart = Date.now();
     const delegationsUsed: string[] = [];
@@ -197,30 +384,43 @@ export const MasterAgentChat: React.FC = () => {
     }
   };
 
-  const getMessageStyle = (type: ChatMessage['type'], toolName?: string) => {
-    switch (type) {
-      case 'user':
-        return 'bg-blue-500 text-white ml-auto';
-      case 'agent':
-        return 'bg-gray-100 text-gray-900';
-      case 'thinking':
-        return 'bg-purple-50 text-purple-900 border border-purple-200';
-      case 'delegation':
-        return 'bg-blue-50 text-blue-900 border border-blue-200';
-      case 'tool':
-        // Special styling for web search tool
-        return toolName === 'SearchWeb' 
-          ? 'bg-teal-50 text-teal-900 border border-teal-300 font-medium'
-          : 'bg-green-50 text-green-900 border border-green-200';
-      case 'telemetry':
-        return 'bg-gray-50 text-gray-700 border border-gray-300 font-mono text-xs';
-      default:
-        return 'bg-gray-100 text-gray-900';
+  const getMessageBubbleStyle = (type: ChatMessage['type'], toolName?: string): string => {
+    if (type === 'user') {
+      return 'bg-gradient-to-br from-blue-500 to-purple-600 text-white px-6 py-4 rounded-3xl shadow-lg';
     }
+    if (type === 'transcription') {
+      return 'bg-gradient-to-br from-purple-50 to-pink-50 border-2 border-purple-300 px-6 py-4 rounded-3xl shadow-md';
+    }
+    if (type === 'delegation' && toolName === 'SearchWeb') {
+      return 'bg-gradient-to-br from-teal-50 to-cyan-50 border-2 border-teal-200 px-6 py-4 rounded-3xl shadow-md';
+    }
+    if (type === 'delegation') {
+      return 'bg-gradient-to-br from-purple-50 to-pink-50 border-2 border-purple-200 px-6 py-4 rounded-3xl shadow-md';
+    }
+    if (type === 'tool') {
+      return 'bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 px-6 py-4 rounded-3xl shadow-md';
+    }
+    if (type === 'multimodal') {
+      return 'bg-gradient-to-br from-pink-50 via-purple-50 to-indigo-50 border-2 border-purple-300 px-6 py-4 rounded-3xl shadow-lg';
+    }
+    if (type === 'thinking') {
+      return 'bg-gradient-to-br from-yellow-50 to-amber-50 border-2 border-yellow-200 px-6 py-4 rounded-3xl shadow-md';
+    }
+    if (type === 'agent') {
+      return 'bg-gradient-to-br from-gray-50 to-slate-50 border-2 border-gray-200 px-6 py-4 rounded-3xl shadow-md';
+    }
+    if (type === 'telemetry') {
+      return 'bg-gray-900 text-gray-100 font-mono text-xs px-6 py-4 rounded-3xl shadow-lg';
+    }
+    return 'bg-white border-2 border-gray-200 px-6 py-4 rounded-3xl shadow-md';
   };
 
   const getMessageIcon = (type: ChatMessage['type'], toolName?: string) => {
     switch (type) {
+      case 'transcription':
+        return '🎤';
+      case 'multimodal':
+        return '🎨';
       case 'thinking':
         return '🤔';
       case 'delegation':
@@ -236,205 +436,379 @@ export const MasterAgentChat: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      {/* Header */}
-      <div className="border-b bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-3xl">🤖</span>
-            <div>
-              <h1 className="text-xl font-bold">Master Agent</h1>
-              <p className="text-sm opacity-90">AI Orchestrator with Multi-Agent Coordination</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showTelemetry}
-                onChange={(e) => setShowTelemetry(e.target.checked)}
-                className="rounded"
-              />
-              Show Telemetry
-            </label>
-            {telemetry.duration && (
-              <div className="bg-white/20 px-3 py-1 rounded-lg text-sm">
-                Last: {telemetry.duration}ms
+    <div className="flex h-full bg-gray-50">
+      {/* Sidebar */}
+      <div className={`${sidebarCollapsed ? 'w-16' : 'w-80'} bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 text-white flex flex-col transition-all duration-300 border-r border-slate-700 shadow-2xl`}>
+        {/* Sidebar Header */}
+        <div className="p-6 border-b border-slate-700">
+          <div className="flex items-center justify-between mb-4">
+            {!sidebarCollapsed && (
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+                  <span className="text-2xl">🤖</span>
+                </div>
+                <div>
+                  <h1 className="text-lg font-bold">Master Agent</h1>
+                  <p className="text-xs text-slate-400">AI Orchestrator</p>
+                </div>
               </div>
             )}
-          </div>
-        </div>
-      </div>
-
-      {/* Connection Error Banner */}
-      {connectionError && (
-        <div className="bg-red-50 border-b border-red-200 p-3">
-          <div className="flex items-start gap-2">
-            <span className="text-red-600 text-xl">⚠️</span>
-            <div className="flex-1">
-              <p className="text-red-800 font-medium text-sm">Connection Error</p>
-              <p className="text-red-600 text-xs mt-1">{connectionError}</p>
-              <p className="text-red-600 text-xs mt-1">
-                Make sure the backend is running: <code className="bg-red-100 px-1 py-0.5 rounded">cd src && dotnet run</code>
-              </p>
-            </div>
             <button
-              onClick={() => setConnectionError(null)}
-              className="text-red-600 hover:text-red-800"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
+              title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
-              ✕
+              <span className="text-xl">{sidebarCollapsed ? '☰' : '‹'}</span>
             </button>
           </div>
+          
+          {!sidebarCollapsed && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm cursor-pointer bg-slate-800/50 p-2 rounded-lg hover:bg-slate-700/50 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={showTelemetry}
+                  onChange={(e) => setShowTelemetry(e.target.checked)}
+                  className="rounded"
+                />
+                <span>Show Telemetry</span>
+              </label>
+            </div>
+          )}
         </div>
-      )}
 
-      {/* Telemetry Dashboard */}
-      {showTelemetry && telemetry.duration && (
-        <div className="border-b bg-gray-50 p-3">
-          <div className="grid grid-cols-4 gap-4 text-sm">
-            <div>
-              <span className="text-gray-600">Duration:</span>
-              <span className="ml-2 font-semibold">{telemetry.duration}ms</span>
-            </div>
-            <div>
-              <span className="text-gray-600">Delegations:</span>
-              <span className="ml-2 font-semibold">{telemetry.delegationCount || 0}</span>
-            </div>
-            <div>
-              <span className="text-gray-600">Sub-Agents:</span>
-              <span className="ml-2 font-semibold">{telemetry.subAgentsUsed?.join(', ') || 'None'}</span>
-            </div>
-            <div>
-              <span className="text-gray-600">Tools:</span>
-              <span className="ml-2 font-semibold">
-                {telemetry.toolsUsed?.length || 0}
-                {telemetry.toolsUsed?.includes('SearchWeb') && (
-                  <span className="ml-1 inline-flex items-center gap-1 bg-teal-100 text-teal-800 px-2 py-0.5 rounded text-xs">
-                    🌐 Web Search
-                  </span>
-                )}
+        {/* Connection Status */}
+        {!sidebarCollapsed && (
+          <div className="px-6 py-4 border-b border-slate-700">
+            <div className="flex items-center gap-2 text-sm">
+              <div className={`w-2 h-2 rounded-full ${connectionError ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`} />
+              <span className="text-slate-300">
+                {connectionError ? 'Disconnected' : 'Connected'}
               </span>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.length === 0 && (
-          <div className="text-center text-gray-500 mt-20">
-            <p className="text-5xl mb-4">🤖</p>
-            <p className="text-xl font-semibold mb-2">Master Agent Orchestrator</p>
-            <p className="text-sm mb-4">
-              I coordinate multiple specialized agents to handle your requests
-            </p>
-            <div className="grid grid-cols-2 gap-3 max-w-2xl mx-auto mt-6">
+        {/* Telemetry Stats */}
+        {!sidebarCollapsed && telemetry.duration && (
+          <div className="px-6 py-4 border-b border-slate-700">
+            <div className="space-y-3">
+              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Session Stats</h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center justify-between bg-slate-800/30 p-2 rounded">
+                  <span className="text-slate-400">⏱️ Duration</span>
+                  <span className="font-semibold">{telemetry.duration}ms</span>
+                </div>
+                <div className="flex items-center justify-between bg-slate-800/30 p-2 rounded">
+                  <span className="text-slate-400">🔄 Delegations</span>
+                  <span className="font-semibold">{telemetry.delegationCount || 0}</span>
+                </div>
+                <div className="flex items-center justify-between bg-slate-800/30 p-2 rounded">
+                  <span className="text-slate-400">🔧 Tools</span>
+                  <span className="font-semibold">{telemetry.toolsUsed?.length || 0}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Sub-Agents Info */}
+        {!sidebarCollapsed && (
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Available Agents</h3>
+            <div className="space-y-2">
               {[
-                { icon: '📊', name: 'Investment Advisor', desc: 'Fund research & recommendations' },
-                { icon: '💼', name: 'Portfolio Manager', desc: 'Portfolio analysis & management' },
-                { icon: '🏦', name: 'Account Services', desc: 'Account operations & balances' },
-                { icon: '⚖️', name: 'Compliance Officer', desc: 'Risk assessment & compliance' }
+                { icon: '📊', name: 'Investment Advisor', desc: 'Fund research' },
+                { icon: '💼', name: 'Portfolio Manager', desc: 'Portfolio mgmt' },
+                { icon: '🏦', name: 'Account Services', desc: 'Account ops' },
+                { icon: '⚖️', name: 'Compliance Officer', desc: 'Risk & compliance' }
               ].map((agent) => (
-                <div key={agent.name} className="bg-gray-50 p-3 rounded-lg border">
+                <div key={agent.name} className="bg-slate-800/40 p-3 rounded-lg hover:bg-slate-800/60 transition-colors">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-2xl">{agent.icon}</span>
-                    <span className="font-medium text-sm">{agent.name}</span>
+                    <span className="text-lg">{agent.icon}</span>
+                    <span className="font-medium text-xs">{agent.name}</span>
                   </div>
-                  <p className="text-xs text-gray-600">{agent.desc}</p>
+                  <p className="text-xs text-slate-400">{agent.desc}</p>
                 </div>
               ))}
             </div>
-            
-            <div className="mt-8 max-w-2xl mx-auto">
-              <p className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                <span>🌐</span>
-                <span>Web Search Capability Enabled</span>
-              </p>
-              <p className="text-xs text-gray-600 mb-3">
-                I can now search the web for real-time information to supplement my knowledge.
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  'Latest AI trends and news',
-                  'Current stock market performance',
-                  'Recent company announcements',
-                  'Economic indicators today'
-                ].map((example, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => setInput(example)}
-                    className="bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-900 text-xs p-2 rounded transition-colors text-left"
-                  >
-                    🌐 {example}
-                  </button>
-                ))}
+
+            <div className="mt-6 p-3 bg-teal-900/30 border border-teal-700/30 rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">🌐</span>
+                <span className="font-semibold text-xs">Web Search</span>
               </div>
+              <p className="text-xs text-slate-400">Real-time web information</p>
             </div>
           </div>
         )}
 
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div className={`max-w-3xl px-4 py-3 rounded-lg ${getMessageStyle(msg.type, msg.toolName)}`}>
-              {getMessageIcon(msg.type, msg.toolName) && (
-                <span className="inline-block mr-2">{getMessageIcon(msg.type, msg.toolName)}</span>
-              )}
-              {msg.type === 'telemetry' ? (
-                <pre className="whitespace-pre-wrap overflow-x-auto">{msg.content}</pre>
-              ) : (
-                <MessageContent 
-                  content={msg.content} 
-                  isAgent={msg.type !== 'user'} 
-                />
-              )}
-              <div className={`text-xs mt-1 ${msg.type === 'user' ? 'opacity-75' : 'opacity-60'}`}>
-                {msg.timestamp.toLocaleTimeString()}
-              </div>
-            </div>
-          </div>
-        ))}
-
-        {isStreaming && (
-          <div className="flex justify-start">
-            <div className="bg-gray-100 px-4 py-3 rounded-lg">
-              <div className="flex gap-1">
-                <span className="animate-bounce">●</span>
-                <span className="animate-bounce" style={{ animationDelay: '0.1s' }}>●</span>
-                <span className="animate-bounce" style={{ animationDelay: '0.2s' }}>●</span>
-              </div>
-            </div>
+        {/* Sidebar Footer */}
+        {!sidebarCollapsed && (
+          <div className="p-4 border-t border-slate-700 text-xs text-slate-500">
+            <p>Conversation: {conversationId.current.substring(5, 13)}</p>
           </div>
         )}
-
-        <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div className="border-t p-4 bg-white">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Ask me anything about investments, portfolios, or accounts..."
-            disabled={isStreaming}
-            className="flex-1 px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-          />
-          <button
-            onClick={handleSend}
-            disabled={isStreaming || !input.trim()}
-            className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-lg hover:from-blue-600 hover:to-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium"
-          >
-            {isStreaming ? 'Processing...' : 'Send'}
-          </button>
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col bg-white">
+        {/* Connection Error Banner */}
+        {connectionError && (
+          <div className="bg-red-50 border-b border-red-200 p-3 animate-slideDown">
+            <div className="flex items-start gap-2 max-w-5xl mx-auto">
+              <span className="text-red-600 text-xl">⚠️</span>
+              <div className="flex-1">
+                <p className="text-red-800 font-medium text-sm">Connection Error</p>
+                <p className="text-red-600 text-xs mt-1">{connectionError}</p>
+                <p className="text-red-600 text-xs mt-1">
+                  Make sure the backend is running: <code className="bg-red-100 px-1 py-0.5 rounded">cd src && dotnet run</code>
+                </p>
+              </div>
+              <button
+                onClick={() => setConnectionError(null)}
+                className="text-red-600 hover:text-red-800"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Messages Container */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+            {messages.length === 0 && (
+              <div className="text-center text-gray-500 mt-20">
+                <div className="inline-block p-6 bg-gradient-to-br from-blue-50 to-purple-50 rounded-3xl shadow-lg mb-6">
+                  <span className="text-6xl">🤖</span>
+                </div>
+                <h2 className="text-3xl font-bold text-gray-800 mb-3">Welcome to Master Agent</h2>
+                <p className="text-lg text-gray-600 mb-8">
+                  I coordinate multiple specialized AI agents to handle your requests
+                </p>
+                
+                <div className="grid grid-cols-2 gap-4 max-w-3xl mx-auto mb-8">
+                  {[
+                    'Analyze my investment portfolio',
+                    'Search for latest AI trends',
+                    'Show account balances',
+                    'Recommend mutual funds'
+                  ].map((example, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setInput(example)}
+                      className="bg-white hover:bg-gray-50 border-2 border-gray-200 hover:border-blue-300 text-gray-700 p-4 rounded-xl transition-all text-left shadow-sm hover:shadow-md"
+                    >
+                      <span className="text-2xl mb-2 block">{['💼', '🌐', '🏦', '📊'][idx]}</span>
+                      <span className="text-sm font-medium">{example}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="bg-gradient-to-r from-teal-50 to-cyan-50 border border-teal-200 rounded-xl p-6 max-w-3xl mx-auto">
+                  <div className="flex items-center gap-3 mb-3">
+                    <span className="text-3xl">🎨</span>
+                    <div className="text-left">
+                      <h3 className="font-bold text-gray-800">Multi-Modal Support</h3>
+                      <p className="text-sm text-gray-600">Upload images, audio, and documents</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="bg-white/60 p-2 rounded">🖼️ Images</div>
+                    <div className="bg-white/60 p-2 rounded">🎵 Audio</div>
+                    <div className="bg-white/60 p-2 rounded">📄 Documents</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div className={`max-w-4xl ${msg.type === 'user' ? 'ml-auto' : 'mr-auto'} ${getMessageBubbleStyle(msg.type, msg.toolName)}`}>
+                  {msg.type !== 'user' && getMessageIcon(msg.type, msg.toolName) && (
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xl">{getMessageIcon(msg.type, msg.toolName)}</span>
+                      <span className="text-xs font-semibold uppercase tracking-wide opacity-70">
+                        {msg.type === 'transcription' ? `Audio Transcription${msg.metadata?.FileName ? ` - ${msg.metadata.FileName}` : ''}` :
+                         msg.type === 'multimodal' ? 'Multi-Modal Response' : 
+                         msg.type === 'thinking' ? 'Thinking' :
+                         msg.type === 'delegation' ? msg.subAgentName :
+                         msg.type === 'tool' ? msg.toolName : 
+                         msg.type}
+                      </span>
+                    </div>
+                  )}
+                  
+                  {/* Show attached files for user messages */}
+                  {msg.files && msg.files.length > 0 && (
+                    <div className="mb-3 grid grid-cols-2 gap-2">
+                      {msg.files.map((file) => (
+                        <div key={file.id} className="flex items-center gap-2 bg-white/80 backdrop-blur rounded-lg p-2 text-xs border border-white/20">
+                          {file.preview ? (
+                            <img src={file.preview} alt={file.file.name} className="w-12 h-12 object-cover rounded" />
+                          ) : (
+                            <span className="text-2xl">{file.file.type.startsWith('audio/') ? '🎵' : '📄'}</span>
+                          )}
+                          <div className="flex-1 truncate">
+                            <div className="font-medium">{file.file.name}</div>
+                            <div className="text-gray-600">{(file.file.size / 1024).toFixed(1)} KB</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {msg.type === 'telemetry' ? (
+                    <pre className="text-xs bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto">{msg.content}</pre>
+                  ) : (
+                    <MessageContent 
+                      content={msg.content} 
+                      isAgent={msg.type !== 'user'} 
+                    />
+                  )}
+                  
+                  <div className="flex items-center justify-between mt-2 text-xs opacity-60">
+                    <span>{msg.timestamp.toLocaleTimeString()}</span>
+                    {msg.metadata?.contentTypes && (
+                      <div className="flex gap-1">
+                        {msg.metadata.contentTypes.map((type: string) => (
+                          <span key={type} className="px-2 py-0.5 bg-white/20 rounded-full">
+                            {type}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {isStreaming && (
+              <div className="flex justify-start">
+                <div className="bg-gray-100 px-6 py-4 rounded-2xl shadow-sm">
+                  <div className="flex gap-2">
+                    <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce" />
+                    <div className="w-3 h-3 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                    <div className="w-3 h-3 bg-pink-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
         </div>
-        <p className="text-xs text-gray-500 mt-2">
-          💡 Try: "Show my portfolio and recommend tech funds" or "What are the latest AI industry trends?" (web search)
-        </p>
+
+        {/* Input Area */}
+        <div className="border-t bg-white shadow-2xl">
+          {/* File Upload Panel */}
+          {showFileUpload && (
+            <div className="border-b bg-gray-50 px-6 py-4 animate-slideDown max-w-5xl mx-auto">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                  <span className="text-xl">📎</span>
+                  Attach Files
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowFileUpload(false);
+                    setUploadedFiles([]);
+                  }}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+              <FileUpload
+                files={uploadedFiles}
+                onFilesChange={setUploadedFiles}
+                maxFiles={5}
+              />
+            </div>
+          )}
+
+          <div className="max-w-5xl mx-auto px-6 py-4">
+            {/* File Chips */}
+            {uploadedFiles.length > 0 && !showFileUpload && (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {uploadedFiles.map((file) => (
+                  <div
+                    key={file.id}
+                    className="flex items-center gap-2 bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-full px-4 py-2 text-sm group hover:shadow-md transition-all"
+                  >
+                    <span className="text-lg">{file.file.type.startsWith('image/') ? '🖼️' : file.file.type.startsWith('audio/') ? '🎵' : '📄'}</span>
+                    <span className="max-w-[200px] truncate font-medium">{file.file.name}</span>
+                    <button
+                      onClick={() => setUploadedFiles(uploadedFiles.filter(f => f.id !== file.id))}
+                      className="text-blue-600 hover:text-red-600 transition-colors font-bold"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              {/* Attach Button */}
+              <button
+                onClick={() => setShowFileUpload(!showFileUpload)}
+                disabled={isStreaming}
+                className={`
+                  flex-shrink-0 w-14 h-14 flex items-center justify-center rounded-xl
+                  transition-all duration-200 disabled:opacity-50 shadow-md hover:shadow-lg
+                  ${showFileUpload 
+                    ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white scale-105' 
+                    : 'bg-white text-gray-600 hover:bg-gray-50 border-2 border-gray-200'
+                  }
+                `}
+                title="Attach files (images, audio, documents)"
+              >
+                <span className="text-2xl">{showFileUpload ? '✕' : '📎'}</span>
+              </button>
+
+              {/* Text Input */}
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+                placeholder={uploadedFiles.length > 0 ? "Add a message (optional)..." : "Type your message..."}
+                disabled={isStreaming}
+                className="flex-1 px-6 py-4 text-lg border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 transition-all shadow-sm"
+              />
+
+              {/* Send Button */}
+              <button
+                onClick={handleSend}
+                disabled={isStreaming || (!input.trim() && uploadedFiles.length === 0)}
+                className="flex-shrink-0 px-8 py-4 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-white rounded-xl hover:from-blue-600 hover:via-purple-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-bold shadow-lg hover:shadow-xl transform hover:scale-105 active:scale-95 text-lg"
+              >
+                {isStreaming ? (
+                  <span className="flex items-center gap-2">
+                    <span className="animate-spin">⏳</span>
+                    Processing
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    {uploadedFiles.length > 0 ? '📤' : '🚀'}
+                    Send
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {uploadedFiles.length > 0 && (
+              <p className="text-xs text-blue-600 font-medium mt-2 text-center">
+                {uploadedFiles.length} file{uploadedFiles.length > 1 ? 's' : ''} attached · Ready to send
+              </p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

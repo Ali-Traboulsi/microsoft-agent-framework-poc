@@ -1,6 +1,6 @@
 # 🏦 Banking Investment Agent Framework Demo
 
-A comprehensive demonstration of Microsoft's Agent Framework applied to a banking and investment management scenario, showcasing multi-agent systems, workflows, and tool integration.
+A comprehensive demonstration of Microsoft's Agent Framework applied to a banking and investment management scenario, showcasing multi-agent systems, workflows, tool integration, and **multi-modal input support** (text, images, audio, documents).
 
 ## 🎯 Overview
 
@@ -9,7 +9,10 @@ This project implements a complete banking investment platform using the Microso
 - **Multi-Agent System**: Specialized agents for different banking roles
 - **Function Tools**: Rich set of banking operations (portfolios, funds, accounts)
 - **Workflows**: Sequential and concurrent agent orchestration
+- **Multi-Modal Input**: Support for images, audio, PDFs alongside text 🆕
 - **Domain Models**: Complete banking entities (accounts, portfolios, mutual funds, transactions)
+- **REST API + SignalR**: HTTP endpoints and real-time streaming
+- **Full Observability**: OpenTelemetry traces and metrics
 
 ## 🏗️ Architecture
 
@@ -126,12 +129,47 @@ The application demonstrates 9 comprehensive scenarios:
 8. **Concurrent Analysis** - Multiple agents analyzing portfolio simultaneously
 9. **Portfolio Rebalancing Advice** - Get recommendations for portfolio optimization
 
-## 🔑 Key Features
+## �️ Multi-Modal Input Support 🆕
+
+The Master Agent now supports **multi-modal input** - send images, audio, PDFs, and documents alongside text:
+
+- **Image Analysis**: Upload stock charts, portfolio visualizations, financial diagrams
+- **Document Processing**: Analyze PDFs, reports, compliance documents
+- **Audio Input**: Process voice recordings and transcribe client calls
+- **Mixed Content**: Combine text, images, and files in a single request
+
+**Quick Test:**
+```bash
+POST http://localhost:5000/api/v2/MasterAgent/chat/multimodal
+
+{
+  "message": "Analyze this portfolio chart",
+  "contents": [{
+    "type": "image",
+    "data": "data:image/png;base64,...",
+    "mediaType": "image/png"
+  }]
+}
+```
+
+**📚 Documentation:**
+- **[Quick Reference](docs/MULTIMODAL_QUICK_REFERENCE.md)** - Fast lookup guide
+- **[Postman Testing Guide](docs/POSTMAN_MULTIMODAL_TESTING.md)** - Step-by-step testing instructions
+- **[Full Usage Guide](docs/MULTIMODAL_USAGE.md)** - Complete API documentation
+- **[Postman Collection](docs/MultiModal-Tests.postman_collection.json)** - Ready-to-use test requests
+
+## �🔑 Key Features
 
 ### ✅ Multi-Agent Collaboration
 - Specialized agents working together
 - Sequential and concurrent workflows
 - Agent-to-agent communication
+
+### ✅ Multi-Modal Processing 🆕
+- Vision-enabled image analysis (charts, diagrams, screenshots)
+- Document understanding (PDFs, reports)
+- Audio transcription and analysis
+- Mixed content in single requests
 
 ### ✅ Function Tools Integration
 - Rich set of banking operations
