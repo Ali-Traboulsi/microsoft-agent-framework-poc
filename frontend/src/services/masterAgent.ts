@@ -49,7 +49,7 @@ class MasterAgentService {
     }
   }
 
-  async* chatStream(message: string, conversationId: string): AsyncGenerator<MasterStreamResponse> {
+  async* chatStream(message: string, conversationId: string, enableThinking: boolean = false): AsyncGenerator<MasterStreamResponse> {
     // Ensure we're connected before streaming
     if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
       console.log('🔄 Not connected, attempting to connect...');
@@ -63,7 +63,8 @@ class MasterAgentService {
     const stream = this.connection.stream<MasterStreamResponse>(
       'ChatStream',
       message,
-      conversationId
+      conversationId,
+      enableThinking
     );
 
     // Create a promise-based queue for async iteration
@@ -122,7 +123,7 @@ class MasterAgentService {
     }
   }
 
-  async* chatStreamMultiModal(contents: ContentInput[], conversationId: string): AsyncGenerator<MasterStreamResponse> {
+  async* chatStreamMultiModal(contents: ContentInput[], conversationId: string, enableThinking: boolean = false): AsyncGenerator<MasterStreamResponse> {
     // Ensure we're connected before streaming
     if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
       console.log('🔄 Not connected, attempting to connect...');
@@ -136,7 +137,8 @@ class MasterAgentService {
     const request = {
       Message: contents.find(c => c.Type === 'text')?.Text || '',
       Contents: contents,
-      ConversationId: conversationId
+      ConversationId: conversationId,
+      EnableThinking: enableThinking
     };
 
     console.log('📤 Sending multimodal request:', JSON.stringify(request, null, 2));
@@ -240,6 +242,48 @@ class MasterAgentService {
 
     return response.json();
   }
+
+  /**
+   * Clear conversation history
+   */
+  async clearConversation(conversationId: string): Promise<boolean> {
+    try {
+      const response = await fetch(`/api/v2/MasterAgent/conversation/${conversationId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        console.error('Failed to clear conversation:', response.statusText);
+        return false;
+      }
+
+      const result = await response.json();
+      return result.data === true;
+    } catch (error) {
+      console.error('Error clearing conversation:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get conversation statistics
+   */
+  async getConversationStats(): Promise<ConversationStats | null> {
+    try {
+      const response = await fetch('/api/v2/MasterAgent/conversation/stats');
+
+      if (!response.ok) {
+        console.error('Failed to get conversation stats:', response.statusText);
+        return null;
+      }
+
+      const result = await response.json();
+      return result.data;
+    } catch (error) {
+      console.error('Error getting conversation stats:', error);
+      return null;
+    }
+  }
 }
 
 export interface MultiModalResponse {
@@ -252,6 +296,11 @@ export interface MultiModalResponse {
     conversationId: string;
   };
   error: string | null;
+}
+
+export interface ConversationStats {
+  activeConversations: number;
+  conversationIds: string[];
 }
 
 export const masterAgentService = new MasterAgentService();

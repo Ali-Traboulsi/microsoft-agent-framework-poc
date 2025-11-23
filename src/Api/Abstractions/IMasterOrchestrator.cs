@@ -12,18 +12,25 @@ public interface IMasterOrchestrator
     /// </summary>
     /// <param name="userMessage">The user's request</param>
     /// <param name="conversationId">Unique identifier for this conversation</param>
+    /// <param name="enableThinking">Enable extended reasoning mode (like ChatGPT o1)</param>
     /// <returns>The orchestrated response</returns>
-    Task<OrchestratorResult> ProcessRequestAsync(string userMessage, string conversationId);
+    Task<OrchestratorResult> ProcessRequestAsync(
+        string userMessage,
+        string conversationId,
+        bool enableThinking = false
+    );
 
     /// <summary>
     /// Process a user request with streaming response
     /// </summary>
     /// <param name="userMessage">The user's request</param>
     /// <param name="conversationId">Unique identifier for this conversation</param>
+    /// <param name="enableThinking">Enable extended reasoning mode (like ChatGPT o1)</param>
     /// <returns>Stream of orchestrator responses</returns>
     IAsyncEnumerable<OrchestratorResponse> ProcessRequestStreamingAsync(
         string userMessage,
-        string conversationId
+        string conversationId,
+        bool enableThinking = false
     );
 
     /// <summary>
@@ -48,10 +55,12 @@ public interface IMasterOrchestrator
     /// </summary>
     /// <param name="contents">List of AIContent items (text, images, audio, URIs)</param>
     /// <param name="conversationId">Unique identifier for this conversation</param>
+    /// <param name="enableThinking">Enable extended reasoning mode (like ChatGPT o1)</param>
     /// <returns>The orchestrated response</returns>
     Task<OrchestratorResult> ProcessMultiModalRequestAsync(
         List<Microsoft.Extensions.AI.AIContent> contents,
-        string conversationId
+        string conversationId,
+        bool enableThinking = false
     );
 
     /// <summary>
@@ -59,10 +68,12 @@ public interface IMasterOrchestrator
     /// </summary>
     /// <param name="contents">List of AIContent items (text, images, audio, URIs)</param>
     /// <param name="conversationId">Unique identifier for this conversation</param>
+    /// <param name="enableThinking">Enable extended reasoning mode (like ChatGPT o1)</param>
     /// <returns>Stream of orchestrator responses</returns>
     IAsyncEnumerable<OrchestratorResponse> ProcessMultiModalRequestStreamingAsync(
         List<Microsoft.Extensions.AI.AIContent> contents,
-        string conversationId
+        string conversationId,
+        bool enableThinking = false
     );
 }
 

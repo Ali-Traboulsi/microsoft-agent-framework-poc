@@ -6,6 +6,7 @@ using System.Text.Json;
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.DTOs;
 using AgentFrameworkQuickStart.Api.Middleware;
+using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Tools;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -40,24 +41,30 @@ public class MasterOrchestrator : IMasterOrchestrator
     private readonly IChatClient _chatClient;
     private readonly IEnumerable<ISubAgent> _subAgents;
     private readonly ILogger<MasterOrchestrator> _logger;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly Lazy<AIAgent> _masterAgent;
     private readonly Dictionary<string, ISubAgent> _subAgentLookup;
     private readonly WebSearchTools _webSearchTools;
     private readonly StructuredResponseHandler _structuredResponseHandler;
+    private readonly AgentThreadManager _threadManager;
 
     public MasterOrchestrator(
         IChatClient chatClient,
         IEnumerable<ISubAgent> subAgents,
         WebSearchTools webSearchTools,
         ILogger<MasterOrchestrator> logger,
-        StructuredResponseHandler structuredResponseHandler
+        ILoggerFactory loggerFactory,
+        StructuredResponseHandler structuredResponseHandler,
+        AgentThreadManager threadManager
     )
     {
         _chatClient = chatClient;
         _subAgents = subAgents;
         _webSearchTools = webSearchTools;
         _logger = logger;
+        _loggerFactory = loggerFactory;
         _structuredResponseHandler = structuredResponseHandler;
+        _threadManager = threadManager;
         _subAgentLookup = subAgents.ToDictionary(sa => sa.Name, sa => sa);
         _masterAgent = new Lazy<AIAgent>(CreateMasterAgentWithMiddleware);
     }
@@ -312,7 +319,8 @@ public class MasterOrchestrator : IMasterOrchestrator
 
     public async Task<OrchestratorResult> ProcessRequestAsync(
         string userMessage,
-        string conversationId
+        string conversationId,
+        bool enableThinking = false
     )
     {
         using var activity = ActivitySource.StartActivity(
@@ -321,6 +329,7 @@ public class MasterOrchestrator : IMasterOrchestrator
         );
         activity?.SetTag("conversation.id", conversationId);
         activity?.SetTag("message.length", userMessage.Length);
+        activity?.SetTag("thinking.enabled", enableThinking);
 
         var sw = Stopwatch.StartNew();
         var subAgentsUsed = new List<string>();
@@ -333,8 +342,70 @@ public class MasterOrchestrator : IMasterOrchestrator
                 userMessage
             );
 
-            var result = await _masterAgent.Value.RunAsync(userMessage);
-            var responseText = result.Messages.LastOrDefault()?.Text ?? "No response generated";
+            // Get or create thread for this conversation
+            var thread = _threadManager.GetOrCreateThread(conversationId, _masterAgent.Value);
+
+            string responseText;
+
+            if (enableThinking)
+            {
+                // Create JSON schema from ThinkingModeResponse type
+                var schema = AIJsonUtilities.CreateJsonSchema(typeof(ThinkingModeResponse));
+
+                // Create agent with structured output using your helper method
+                var thinkingAgent = CreateMasterAgentWithSchemaAndTools(schema);
+
+                // Note: Tools need to be registered after agent creation
+                // Wrap with tools and middleware
+                thinkingAgent = thinkingAgent
+                    .AsBuilder()
+                    .Use(DelegationEventMiddleware.FunctionInvocationMiddleware)
+                    .Build();
+
+                _logger.LogInformation(
+                    "Running agent with structured output (thinking mode enabled) for conversation {ConversationId}",
+                    conversationId
+                );
+
+                var result = await thinkingAgent.RunAsync(userMessage, thread);
+
+                // Deserialize the structured JSON response
+                var thinkingResponse = result.Deserialize<ThinkingModeResponse>(
+                    JsonSerializerOptions.Web
+                );
+
+                if (thinkingResponse != null)
+                {
+                    // Format response with thinking and content sections
+                    var formattedResponse = new StringBuilder();
+                    if (!string.IsNullOrEmpty(thinkingResponse.Thinking))
+                    {
+                        formattedResponse.AppendLine("## 🤔 Thinking Process\n");
+                        formattedResponse.AppendLine(thinkingResponse.Thinking);
+                        formattedResponse.AppendLine("\n---\n");
+                    }
+                    if (!string.IsNullOrEmpty(thinkingResponse.Content))
+                    {
+                        formattedResponse.AppendLine("## 💡 Response\n");
+                        formattedResponse.AppendLine(thinkingResponse.Content);
+                    }
+                    responseText = formattedResponse.ToString();
+                }
+                else
+                {
+                    responseText = result.Messages.LastOrDefault()?.Text ?? "No response generated";
+                }
+            }
+            else
+            {
+                // Standard mode without thinking - use thread for conversation history
+                _logger.LogInformation(
+                    "Running agent in standard mode for conversation {ConversationId}",
+                    conversationId
+                );
+                var result = await _masterAgent.Value.RunAsync(userMessage, thread);
+                responseText = result.Messages.LastOrDefault()?.Text ?? "No response generated";
+            }
 
             sw.Stop();
 
@@ -380,7 +451,8 @@ public class MasterOrchestrator : IMasterOrchestrator
 
     public async IAsyncEnumerable<OrchestratorResponse> ProcessRequestStreamingAsync(
         string userMessage,
-        string conversationId
+        string conversationId,
+        bool enableThinking = false
     )
     {
         using var activity = ActivitySource.StartActivity(
@@ -389,9 +461,20 @@ public class MasterOrchestrator : IMasterOrchestrator
         );
         activity?.SetTag("conversation.id", conversationId);
         activity?.SetTag("message.length", userMessage.Length);
+        activity?.SetTag("thinking.enabled", enableThinking);
+
+        // TODO: Thinking mode not yet implemented for streaming
+        // Structured output requires complete response, incompatible with streaming
+        if (enableThinking)
+        {
+            _logger.LogWarning("Thinking mode requested for streaming but not yet supported");
+        }
 
         // Set conversation ID for middleware to track events
         DelegationEventMiddleware.CurrentConversationId = conversationId;
+
+        // Get or create thread for this conversation to maintain chat history
+        var thread = _threadManager.GetOrCreateThread(conversationId, _masterAgent.Value);
 
         _logger.LogInformation(
             "Processing streaming request for conversation {ConversationId}: {Message}",
@@ -408,7 +491,7 @@ public class MasterOrchestrator : IMasterOrchestrator
 
         try
         {
-            await foreach (var chunk in _masterAgent.Value.RunStreamingAsync(userMessage))
+            await foreach (var chunk in _masterAgent.Value.RunStreamingAsync(userMessage, thread))
             {
                 // Check for new delegation events FIRST
                 while (
@@ -606,7 +689,8 @@ public class MasterOrchestrator : IMasterOrchestrator
 
     public async Task<OrchestratorResult> ProcessMultiModalRequestAsync(
         List<AIContent> contents,
-        string conversationId
+        string conversationId,
+        bool enableThinking = false
     )
     {
         using var activity = ActivitySource.StartActivity(
@@ -616,6 +700,13 @@ public class MasterOrchestrator : IMasterOrchestrator
         activity?.SetTag("conversation.id", conversationId);
         activity?.SetTag("content.count", contents.Count);
         activity?.SetTag("content.types", string.Join(",", contents.Select(c => c.GetType().Name)));
+        activity?.SetTag("thinking.enabled", enableThinking);
+
+        // TODO: Thinking mode not yet implemented for multimodal
+        if (enableThinking)
+        {
+            _logger.LogWarning("Thinking mode requested for multimodal but not yet supported");
+        }
 
         var sw = Stopwatch.StartNew();
 
@@ -627,11 +718,14 @@ public class MasterOrchestrator : IMasterOrchestrator
                 contents.Count
             );
 
+            // Get or create thread for this conversation to maintain chat history
+            var thread = _threadManager.GetOrCreateThread(conversationId, _masterAgent.Value);
+
             // Create chat message with all content types
             var chatMessage = new ChatMessage(ChatRole.User, contents);
 
-            // Run the agent with multi-modal content
-            var result = await _masterAgent.Value.RunAsync(chatMessage);
+            // Run the agent with multi-modal content and thread for history
+            var result = await _masterAgent.Value.RunAsync(chatMessage, thread);
             var responseText = result.Messages.LastOrDefault()?.Text ?? "No response generated.";
 
             sw.Stop();
@@ -680,7 +774,8 @@ public class MasterOrchestrator : IMasterOrchestrator
 
     public async IAsyncEnumerable<OrchestratorResponse> ProcessMultiModalRequestStreamingAsync(
         List<AIContent> contents,
-        string conversationId
+        string conversationId,
+        bool enableThinking = false
     )
     {
         using var activity = ActivitySource.StartActivity(
@@ -690,6 +785,15 @@ public class MasterOrchestrator : IMasterOrchestrator
         activity?.SetTag("conversation.id", conversationId);
         activity?.SetTag("content.count", contents.Count);
         activity?.SetTag("content.types", string.Join(",", contents.Select(c => c.GetType().Name)));
+        activity?.SetTag("thinking.enabled", enableThinking);
+
+        // TODO: Thinking mode not yet implemented for multimodal streaming
+        if (enableThinking)
+        {
+            _logger.LogWarning(
+                "Thinking mode requested for multimodal streaming but not yet supported"
+            );
+        }
 
         _logger.LogInformation(
             "Processing streaming multi-modal request for conversation {ConversationId} with {ContentCount} content items",
@@ -697,14 +801,17 @@ public class MasterOrchestrator : IMasterOrchestrator
             contents.Count
         );
 
+        // Get or create thread for this conversation to maintain chat history
+        var thread = _threadManager.GetOrCreateThread(conversationId, _masterAgent.Value);
+
         var contentBuilder = new StringBuilder();
         var startTime = Stopwatch.GetTimestamp();
 
         // Create chat message with all content types
         var chatMessage = new ChatMessage(ChatRole.User, contents);
 
-        // Stream the agent's response
-        await foreach (var update in _masterAgent.Value.RunStreamingAsync(chatMessage))
+        // Stream the agent's response with thread for history
+        await foreach (var update in _masterAgent.Value.RunStreamingAsync(chatMessage, thread))
         {
             if (update.Contents is { Count: > 0 })
             {
@@ -751,6 +858,53 @@ public class MasterOrchestrator : IMasterOrchestrator
                 ["contentCount"] = contents.Count,
             },
         };
+    }
+
+    private AIAgent CreateMasterAgentWithSchemaAndTools(JsonElement schema)
+    {
+        // Create ChatOptions with structured output
+        var chatOptions = new ChatOptions
+        {
+            ResponseFormat = ChatResponseFormat.ForJsonSchema(
+                schema: schema,
+                schemaName: "ThinkingModeResponse",
+                schemaDescription: "Response with thinking and content"
+            ),
+        };
+
+        // Build your tools as AIFunctions
+        var delegateToSubAgentTool = AIFunctionFactory.Create(DelegateToSubAgent);
+        var delegateToMultiTool = AIFunctionFactory.Create(DelegateToMultipleSubAgents);
+        var listAgentsTool = AIFunctionFactory.Create(GetAvailableSubAgentsAsString);
+        var webSearchTool = AIFunctionFactory.Create(_webSearchTools.SearchWeb);
+
+        // Put your tools into a list of AITool
+        var toolList = new List<AITool>
+        {
+            delegateToSubAgentTool,
+            delegateToMultiTool,
+            listAgentsTool,
+            webSearchTool,
+        };
+
+        // Now use the ChatClientAgentOptions constructor that accepts tools
+        var agentOptions = new ChatClientAgentOptions(
+            instructions: AgentInstructionsLoader.LoadMasterAgentInstructions(_subAgents),
+            name: "MasterAgentThinkingWithTools",
+            description: null,
+            tools: toolList
+        );
+
+        // Also set the ChatOptions (structured output) on the agentOptions
+        agentOptions.ChatOptions = chatOptions;
+
+        // Finally create the agent with proper logging
+        return new ChatClientAgent(
+            _chatClient,
+            agentOptions,
+            loggerFactory: _loggerFactory,
+            services: null // IServiceProvider not needed for basic scenarios
+        );
     }
 }
 

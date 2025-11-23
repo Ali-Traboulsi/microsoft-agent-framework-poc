@@ -58,7 +58,8 @@ public class MasterAgentHub : Hub
     public async IAsyncEnumerable<MasterStreamingResponse> ChatStream(
         string message,
         string conversationId,
-        [EnumeratorCancellation] CancellationToken cancellationToken
+        bool enableThinking = false,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default
     )
     {
         _logger.LogInformation(
@@ -69,7 +70,7 @@ public class MasterAgentHub : Hub
 
         await foreach (
             var response in _orchestrator
-                .ProcessRequestStreamingAsync(message, conversationId)
+                .ProcessRequestStreamingAsync(message, conversationId, enableThinking)
                 .WithCancellation(cancellationToken)
         )
         {
@@ -144,16 +145,16 @@ public class MasterAgentHub : Hub
             }
         }
 
-        // Convert to text with audio transcription support
-        var textParts = new List<string>();
+        // Convert to AIContent list for native multimodal support
+        var aiContents = new List<AIContent>();
 
-        // Add text message if provided
+        // Add text message first if provided
         if (!string.IsNullOrEmpty(request.Message))
         {
-            textParts.Add(request.Message);
+            aiContents.Add(new TextContent(request.Message));
         }
 
-        // Process each content item with audio transcription
+        // Process each content item - transcribe audio, pass everything else to AI natively
         foreach (var content in request.Contents)
         {
             _logger.LogInformation(
@@ -215,44 +216,50 @@ public class MasterAgentHub : Hub
                     IsComplete = false,
                 };
 
-                // Add transcription as text with clearer context for the AI
-                textParts.Add(
-                    $"The user uploaded an audio file '{fileName}' which contains the following spoken content: \"{transcript}\""
+                // Add transcript as text content for AI
+                aiContents.Add(
+                    new TextContent($"[Audio file '{fileName}' transcription]: {transcript}")
                 );
-            }
-            else if (
-                content.Type?.ToLowerInvariant() == "text"
-                && !string.IsNullOrEmpty(content.Text)
-            )
-            {
-                _logger.LogInformation("Text content detected");
-                textParts.Add(content.Text);
             }
             else
             {
-                _logger.LogWarning(
-                    "Content skipped: Type={Type}, IsAudio={IsAudio}",
-                    content.Type,
-                    content.MediaType != null
-                        && AudioTranscriptionService.IsAudioFile(content.MediaType)
-                );
+                // For images, PDFs, documents, etc. - pass directly to AI model natively
+                var aiContent = ContentConverter.ConvertToAIContent(content);
+                if (aiContent != null)
+                {
+                    aiContents.Add(aiContent);
+                    _logger.LogInformation(
+                        "Added {ContentType} content for native multimodal AI processing",
+                        content.Type
+                    );
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Unable to convert content: Type={Type}, MediaType={MediaType}",
+                        content.Type,
+                        content.MediaType
+                    );
+                }
             }
         }
 
         var conversationId = request.ConversationId ?? Guid.NewGuid().ToString();
 
-        // Combine all text parts into a single message for the master orchestrator
-        var combinedMessage = string.Join("\n\n", textParts);
-
         _logger.LogInformation(
-            "Processing multi-modal request with combined message length: {Length}",
-            combinedMessage.Length
+            "Processing multi-modal request with {ContentCount} AIContent items for conversation {ConversationId}",
+            aiContents.Count,
+            conversationId
         );
 
-        // Use the regular ProcessRequestStreamingAsync for full Master Agent orchestration
+        // Use native multimodal streaming - AI model handles images, PDFs, documents directly
         await foreach (
             var response in _orchestrator
-                .ProcessRequestStreamingAsync(combinedMessage, conversationId)
+                .ProcessMultiModalRequestStreamingAsync(
+                    aiContents,
+                    conversationId,
+                    request.EnableThinking
+                )
                 .WithCancellation(cancellationToken)
         )
         {

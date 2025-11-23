@@ -83,6 +83,11 @@ public record MultiModalChatRequest
     /// Optional conversation ID for maintaining context
     /// </summary>
     public string? ConversationId { get; set; }
+
+    /// <summary>
+    /// Enable extended reasoning mode (like ChatGPT o1)
+    /// </summary>
+    public bool EnableThinking { get; set; } = false;
 }
 
 /// <summary>
@@ -121,4 +126,9 @@ public class MultiModalFormRequest
     /// Optional conversation ID for maintaining context
     /// </summary>
     public string? ConversationId { get; set; }
+
+    /// <summary>
+    /// Enable extended reasoning mode (like ChatGPT o1)
+    /// </summary>
+    public bool EnableThinking { get; set; } = false;
 }

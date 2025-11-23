@@ -13,16 +13,19 @@ public class MasterAgentController : ControllerBase
     private readonly IMasterOrchestrator _orchestrator;
     private readonly ILogger<MasterAgentController> _logger;
     private readonly AudioTranscriptionService _audioService;
+    private readonly AgentThreadManager _threadManager;
 
     public MasterAgentController(
         IMasterOrchestrator orchestrator,
         ILogger<MasterAgentController> logger,
-        AudioTranscriptionService audioService
+        AudioTranscriptionService audioService,
+        AgentThreadManager threadManager
     )
     {
         _orchestrator = orchestrator;
         _logger = logger;
         _audioService = audioService;
+        _threadManager = threadManager;
     }
 
     [HttpPost("chat")]
@@ -35,7 +38,11 @@ public class MasterAgentController : ControllerBase
             _logger.LogInformation("Master agent chat request: {Message}", request.Message);
 
             var conversationId = request.ConversationId ?? Guid.NewGuid().ToString();
-            var result = await _orchestrator.ProcessRequestAsync(request.Message, conversationId);
+            var result = await _orchestrator.ProcessRequestAsync(
+                request.Message,
+                conversationId,
+                request.EnableThinking
+            );
 
             return Ok(
                 new ApiResponse<OrchestratorResultDto>(
@@ -170,7 +177,8 @@ public class MasterAgentController : ControllerBase
             // Process through orchestrator
             var result = await _orchestrator.ProcessMultiModalRequestAsync(
                 aiContents,
-                conversationId
+                conversationId,
+                request.EnableThinking
             );
 
             var processingTime = (DateTime.UtcNow - startTime).TotalMilliseconds;
@@ -270,7 +278,8 @@ public class MasterAgentController : ControllerBase
             // Process through orchestrator
             var result = await _orchestrator.ProcessMultiModalRequestAsync(
                 aiContents,
-                conversationId
+                conversationId,
+                request.EnableThinking
             );
 
             var processingTime = (DateTime.UtcNow - startTime).TotalMilliseconds;
@@ -345,12 +354,68 @@ public class MasterAgentController : ControllerBase
             return Ok(new ApiResponse<List<SubAgentInfoDto>>(false, null, ex.Message));
         }
     }
+
+    /// <summary>
+    /// Clear conversation history for a specific conversation
+    /// </summary>
+    [HttpDelete("conversation/{conversationId}")]
+    public ActionResult<ApiResponse<bool>> ClearConversation(string conversationId)
+    {
+        try
+        {
+            var cleared = _threadManager.ClearThread(conversationId);
+            return Ok(
+                new ApiResponse<bool>(
+                    Success: cleared,
+                    Data: cleared,
+                    Error: cleared ? null : "Conversation not found"
+                )
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error clearing conversation {ConversationId}", conversationId);
+            return Ok(new ApiResponse<bool>(false, false, ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// Get statistics about active conversations
+    /// </summary>
+    [HttpGet("conversation/stats")]
+    public ActionResult<ApiResponse<ConversationStatsDto>> GetConversationStats()
+    {
+        try
+        {
+            var stats = new ConversationStatsDto
+            {
+                ActiveConversations = _threadManager.GetActiveThreadCount(),
+                ConversationIds = _threadManager.GetActiveConversationIds().ToList(),
+            };
+
+            return Ok(
+                new ApiResponse<ConversationStatsDto>(Success: true, Data: stats, Error: null)
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting conversation stats");
+            return Ok(new ApiResponse<ConversationStatsDto>(false, null, ex.Message));
+        }
+    }
+}
+
+public class ConversationStatsDto
+{
+    public int ActiveConversations { get; set; }
+    public List<string> ConversationIds { get; set; } = new();
 }
 
 public class MasterChatRequest
 {
     public required string Message { get; set; }
     public string? ConversationId { get; set; }
+    public bool EnableThinking { get; set; } = false;
 }
 
 public class OrchestratorResultDto

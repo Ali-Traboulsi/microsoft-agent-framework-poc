@@ -185,6 +185,9 @@ builder.Services.AddSwaggerGen(c =>
 // Register data store (Singleton - shared across all requests)
 builder.Services.AddSingleton<InvestmentDataStore>();
 
+// Register agent thread manager (Singleton - manages conversation threads)
+builder.Services.AddSingleton<AgentThreadManager>();
+
 // Register audio transcription service (Scoped)
 builder.Services.AddHttpClient<AudioTranscriptionService>();
 
