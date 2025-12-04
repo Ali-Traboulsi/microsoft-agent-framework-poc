@@ -1,0 +1,1525 @@
+{
+  "info": {
+    "_postman_id": "profit-projection-comprehensive-tests",
+    "name": "Investment Banking Platform - Complete API Tests",
+    "description": "Comprehensive test collection for all API endpoints including Profit Projection Workflow, Master Agent, Accounts, Portfolios, and Funds.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "testCif",
+      "value": "100000000001",
+      "type": "string"
+    },
+    {
+      "key": "conversationId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "🎯 Profit Projection Workflow",
+      "description": "احتساب الأرباح التقديرية - Complete profit projection workflow tests",
+      "item": [
+        {
+          "name": "Calculate Projection - Basic (Anonymous)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has projectionId', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.projectionId).to.exist;",
+                  "});",
+                  "",
+                  "pm.test('Response has all three scenarios', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.scenarios.conservative).to.exist;",
+                  "    pm.expect(jsonData.scenarios.expected).to.exist;",
+                  "    pm.expect(jsonData.scenarios.optimistic).to.exist;",
+                  "});",
+                  "",
+                  "pm.test('Response has recommended funds', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.recommendedFunds).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"investmentAmount\": 50000,\n  \"currency\": \"SAR\",\n  \"timeHorizonMonths\": 12,\n  \"riskProfile\": \"Moderate\",\n  \"investmentType\": \"LumpSum\",\n  \"shariahCompliantOnly\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/calculate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "calculate"]
+            },
+            "description": "Basic projection calculation without customer context"
+          }
+        },
+        {
+          "name": "Calculate Projection - With Customer Context",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response includes customer context', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.metadata.customerId).to.exist;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"investmentAmount\": 100000,\n  \"currency\": \"SAR\",\n  \"timeHorizonMonths\": 36,\n  \"riskProfile\": \"Aggressive\",\n  \"investmentType\": \"LumpSum\",\n  \"shariahCompliantOnly\": false,\n  \"customerId\": \"{{testCif}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/calculate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "calculate"]
+            },
+            "description": "Projection with existing customer context - fetches existing holdings"
+          }
+        },
+        {
+          "name": "Calculate Projection - Shariah Compliant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has projectionId', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.projectionId).to.exist;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"investmentAmount\": 75000,\n  \"currency\": \"SAR\",\n  \"timeHorizonMonths\": 24,\n  \"riskProfile\": \"Moderate\",\n  \"investmentType\": \"LumpSum\",\n  \"shariahCompliantOnly\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/calculate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "calculate"]
+            },
+            "description": "Projection filtered for Shariah-compliant funds only"
+          }
+        },
+        {
+          "name": "Calculate Projection - Monthly SIP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Monthly projections exist', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.scenarios.expected.monthlyProjections).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"investmentAmount\": 60000,\n  \"currency\": \"SAR\",\n  \"timeHorizonMonths\": 24,\n  \"riskProfile\": \"Conservative\",\n  \"investmentType\": \"Monthly\",\n  \"monthlyAmount\": 2500,\n  \"shariahCompliantOnly\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/calculate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "calculate"]
+            },
+            "description": "Monthly SIP (Systematic Investment Plan) projection"
+          }
+        },
+        {
+          "name": "Calculate Projection - Conservative Profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"investmentAmount\": 25000,\n  \"currency\": \"SAR\",\n  \"timeHorizonMonths\": 12,\n  \"riskProfile\": \"Conservative\",\n  \"investmentType\": \"LumpSum\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/calculate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "calculate"]
+            },
+            "description": "Conservative risk profile - should favor Money Market and Fixed Income funds"
+          }
+        },
+        {
+          "name": "Calculate Projection - Aggressive Profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"investmentAmount\": 200000,\n  \"currency\": \"SAR\",\n  \"timeHorizonMonths\": 60,\n  \"riskProfile\": \"Aggressive\",\n  \"investmentType\": \"LumpSum\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/calculate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "calculate"]
+            },
+            "description": "Aggressive risk profile - should favor Equity funds"
+          }
+        },
+        {
+          "name": "Calculate Projection - Large Investment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"investmentAmount\": 1000000,\n  \"currency\": \"SAR\",\n  \"timeHorizonMonths\": 36,\n  \"riskProfile\": \"Moderate\",\n  \"investmentType\": \"LumpSum\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/calculate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "calculate"]
+            },
+            "description": "Large investment amount - should include risk warning"
+          }
+        },
+        {
+          "name": "Customer Projection Endpoint",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"investmentAmount\": 50000,\n  \"currency\": \"SAR\",\n  \"timeHorizonMonths\": 12,\n  \"riskProfile\": \"Moderate\",\n  \"investmentType\": \"LumpSum\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/customer/{{testCif}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "customer", "{{testCif}}"]
+            },
+            "description": "Personalized projection for existing customer using path parameter"
+          }
+        },
+        {
+          "name": "Compare Strategies (LumpSum vs SIP)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Has strategy comparison', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.lumpSum).to.exist;",
+                  "    pm.expect(jsonData.monthlySip).to.exist;",
+                  "    pm.expect(jsonData.recommendedStrategy).to.exist;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"totalAmount\": 120000,\n  \"timeHorizonMonths\": 24,\n  \"riskProfile\": \"Moderate\",\n  \"currency\": \"SAR\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/compare-strategies",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "compare-strategies"]
+            },
+            "description": "Compare Lump Sum vs Monthly SIP investment strategies"
+          }
+        },
+        {
+          "name": "Quick Estimate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Has projected value', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.projectedValue).to.exist;",
+                  "    pm.expect(jsonData.projectedValue).to.be.above(0);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/quick-estimate?amount=50000&years=5&riskLevel=moderate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "quick-estimate"],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "50000"
+                },
+                {
+                  "key": "years",
+                  "value": "5"
+                },
+                {
+                  "key": "riskLevel",
+                  "value": "moderate"
+                }
+              ]
+            },
+            "description": "Quick projection estimate without full workflow"
+          }
+        },
+        {
+          "name": "Quick Estimate - Conservative",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/quick-estimate?amount=100000&years=10&riskLevel=conservative",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "quick-estimate"],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "100000"
+                },
+                {
+                  "key": "years",
+                  "value": "10"
+                },
+                {
+                  "key": "riskLevel",
+                  "value": "conservative"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Quick Estimate - Aggressive",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/quick-estimate?amount=100000&years=10&riskLevel=aggressive",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "quick-estimate"],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "100000"
+                },
+                {
+                  "key": "years",
+                  "value": "10"
+                },
+                {
+                  "key": "riskLevel",
+                  "value": "aggressive"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🤖 Master Agent (v2)",
+      "description": "Master Orchestrator Agent - delegates to specialized sub-agents",
+      "item": [
+        {
+          "name": "Chat - Basic Query",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is successful', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data.response).to.exist;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What investment options do you offer?\",\n  \"enableThinking\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "Basic chat with master agent"
+          }
+        },
+        {
+          "name": "Chat - Portfolio Query",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Uses PortfolioManager sub-agent', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.data.subAgentsUsed).to.include('PortfolioManager');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Show me all my portfolios and their current value\",\n  \"enableThinking\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "Query that should route to PortfolioManager"
+          }
+        },
+        {
+          "name": "Chat - Investment Advice",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"I have 100,000 SAR to invest. I'm moderate risk. What funds do you recommend?\",\n  \"enableThinking\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "Investment advice query - routes to InvestmentAdvisor"
+          }
+        },
+        {
+          "name": "Chat - Account Balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What is the balance in account ACC001?\",\n  \"enableThinking\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "Account query - routes to AccountServices"
+          }
+        },
+        {
+          "name": "Chat - Compliance Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Is investing 500,000 SAR in a single equity fund compliant with regulations?\",\n  \"enableThinking\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "Compliance query - routes to ComplianceOfficer"
+          }
+        },
+        {
+          "name": "Chat - Web Search Query",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What is the current oil price and how might it affect Saudi stocks?\",\n  \"enableThinking\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "Query requiring web search for real-time data"
+          }
+        },
+        {
+          "name": "Chat - With Conversation Context",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "pm.collectionVariables.set('conversationId', 'conv-' + Date.now());"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"I want to invest 50,000 SAR\",\n  \"conversationId\": \"{{conversationId}}\",\n  \"enableThinking\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "First message in a conversation"
+          }
+        },
+        {
+          "name": "Chat - Follow-up Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What about conservative options?\",\n  \"conversationId\": \"{{conversationId}}\",\n  \"enableThinking\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat"]
+            },
+            "description": "Follow-up using same conversation ID"
+          }
+        },
+        {
+          "name": "Chat - Structured Response",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Compare SNBEQTY and SNBBALANCED funds\",\n  \"enableThinking\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat/structured",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat", "structured"]
+            },
+            "description": "Get structured JSON response"
+          }
+        },
+        {
+          "name": "Chat - Multi-Modal (Base64 Image)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What can you tell me about this chart?\",\n  \"contents\": [\n    {\n      \"type\": \"image\",\n      \"data\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==\",\n      \"mediaType\": \"image/png\"\n    }\n  ],\n  \"enableThinking\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/chat/multimodal",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "chat", "multimodal"]
+            },
+            "description": "Multi-modal chat with base64 encoded image"
+          }
+        },
+        {
+          "name": "Get Available Sub-Agents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Returns list of sub-agents', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.data).to.be.an('array');",
+                  "    pm.expect(jsonData.data.length).to.be.above(0);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/subagents",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "subagents"]
+            },
+            "description": "List all available sub-agents"
+          }
+        },
+        {
+          "name": "Get Conversation Stats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/conversation/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "conversation", "stats"]
+            },
+            "description": "Get statistics about active conversations"
+          }
+        },
+        {
+          "name": "Clear Conversation",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/masteragent/conversation/{{conversationId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "masteragent", "conversation", "{{conversationId}}"]
+            },
+            "description": "Clear conversation history"
+          }
+        }
+      ]
+    },
+    {
+      "name": "👥 Agents (Direct)",
+      "description": "Direct access to individual agents",
+      "item": [
+        {
+          "name": "Get Available Agents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Returns agent list', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.data).to.include('PortfolioManager');",
+                  "    pm.expect(jsonData.data).to.include('InvestmentAdvisor');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/agents",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "agents"]
+            }
+          }
+        },
+        {
+          "name": "Chat with PortfolioManager",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"List all portfolios\",\n  \"agentName\": \"PortfolioManager\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/agents/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "agents", "chat"]
+            }
+          }
+        },
+        {
+          "name": "Chat with InvestmentAdvisor",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What are the best performing funds this year?\",\n  \"agentName\": \"InvestmentAdvisor\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/agents/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "agents", "chat"]
+            }
+          }
+        },
+        {
+          "name": "Chat with AccountServices",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Show account ACC001 details\",\n  \"agentName\": \"AccountServices\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/agents/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "agents", "chat"]
+            }
+          }
+        },
+        {
+          "name": "Chat with ComplianceOfficer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What are the investment limits for retail investors?\",\n  \"agentName\": \"ComplianceOfficer\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/agents/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "agents", "chat"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "💰 Accounts",
+      "description": "Account management endpoints",
+      "item": [
+        {
+          "name": "Get All Accounts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Returns account list', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "accounts"]
+            }
+          }
+        },
+        {
+          "name": "Get Account by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Returns account details', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.data.accountId).to.exist;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/ACC001",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "accounts", "ACC001"]
+            }
+          }
+        },
+        {
+          "name": "Get Account Balance (Agent)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/ACC001/balance",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "accounts", "ACC001", "balance"]
+            },
+            "description": "Get balance using AI agent"
+          }
+        },
+        {
+          "name": "Deposit Funds",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "10000"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/ACC001/deposit",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "accounts", "ACC001", "deposit"]
+            }
+          }
+        },
+        {
+          "name": "Get Account Transactions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/ACC001/transactions?limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "accounts", "ACC001", "transactions"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Account - Not Found",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 404', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/INVALID",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "accounts", "INVALID"]
+            },
+            "description": "Test 404 response for invalid account"
+          }
+        }
+      ]
+    },
+    {
+      "name": "📊 Portfolios",
+      "description": "Portfolio management endpoints",
+      "item": [
+        {
+          "name": "Get All Portfolios",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Returns portfolio list', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/portfolios",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "portfolios"]
+            }
+          }
+        },
+        {
+          "name": "Get Portfolios by Account",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/portfolios?accountId=ACC001",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "portfolios"],
+              "query": [
+                {
+                  "key": "accountId",
+                  "value": "ACC001"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Portfolio by ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/portfolios/PORT001",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "portfolios", "PORT001"]
+            }
+          }
+        },
+        {
+          "name": "Get Portfolio Details (Agent)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/portfolios/PORT001/details",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "portfolios", "PORT001", "details"]
+            },
+            "description": "Get detailed portfolio info using AI agent"
+          }
+        },
+        {
+          "name": "Get Portfolio Allocation",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/portfolios/PORT001/allocation",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "portfolios", "PORT001", "allocation"]
+            }
+          }
+        },
+        {
+          "name": "Create Portfolio",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountId\": \"ACC001\",\n  \"portfolioName\": \"Growth Portfolio\",\n  \"strategy\": \"Aggressive Growth\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/portfolios",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "portfolios"]
+            }
+          }
+        },
+        {
+          "name": "Invest in Fund",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountId\": \"ACC001\",\n  \"portfolioId\": \"PORT001\",\n  \"fundSymbol\": \"SNBEQTY\",\n  \"amount\": 5000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/portfolios/PORT001/invest",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "portfolios", "PORT001", "invest"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "📈 Funds",
+      "description": "Mutual fund endpoints",
+      "item": [
+        {
+          "name": "Get All Funds",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Returns fund list', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/funds",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "funds"]
+            }
+          }
+        },
+        {
+          "name": "Get Fund by ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/funds/SNBEQTY",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "funds", "SNBEQTY"]
+            }
+          }
+        },
+        {
+          "name": "Get Fund Details (Agent)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/funds/SNBEQTY/details",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "funds", "SNBEQTY", "details"]
+            },
+            "description": "Get detailed fund info using AI agent"
+          }
+        },
+        {
+          "name": "Search Funds",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"Equity\",\n  \"riskLevel\": \"Medium\",\n  \"minReturn\": 5\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/funds/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "funds", "search"]
+            }
+          }
+        },
+        {
+          "name": "Search Funds - Low Risk",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"riskLevel\": \"Low\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/funds/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "funds", "search"]
+            }
+          }
+        },
+        {
+          "name": "Compare Funds",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\"SNBEQTY\", \"SNBBALANCED\", \"SNBFIXED\"]"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/funds/compare",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "funds", "compare"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔌 SNB Capital API (External)",
+      "description": "Direct tests against SNB Capital API",
+      "item": [
+        {
+          "name": "Get Mutual Funds",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has data array', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.isSuccess).to.be.true;",
+                  "    pm.expect(jsonData.data).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "https://snbc-api.onrender.com/snbc/api/v1/customer/mutualfunds?cif={{testCif}}",
+              "host": ["snbc-api.onrender.com"],
+              "path": ["snbc", "api", "v1", "customer", "mutualfunds"],
+              "query": [
+                {
+                  "key": "cif",
+                  "value": "{{testCif}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Customer Portfolios",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "https://snbc-api.onrender.com/snbc/api/v1/customer/portfolios?cif={{testCif}}",
+              "host": ["snbc-api.onrender.com"],
+              "path": ["snbc", "api", "v1", "customer", "portfolios"],
+              "query": [
+                {
+                  "key": "cif",
+                  "value": "{{testCif}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Mutual Fund Holdings",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "https://snbc-api.onrender.com/snbc/api/v1/customer/portfolios/1234567890/holdings/mf?cif={{testCif}}",
+              "host": ["snbc-api.onrender.com"],
+              "path": ["snbc", "api", "v1", "customer", "portfolios", "1234567890", "holdings", "mf"],
+              "query": [
+                {
+                  "key": "cif",
+                  "value": "{{testCif}}"
+                }
+              ]
+            },
+            "description": "Replace portfolio number with actual value from portfolios response"
+          }
+        },
+        {
+          "name": "Get Local Market Holdings",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "https://snbc-api.onrender.com/snbc/api/v1/customer/portfolios/1234567890/holdings/local-market?cif={{testCif}}",
+              "host": ["snbc-api.onrender.com"],
+              "path": ["snbc", "api", "v1", "customer", "portfolios", "1234567890", "holdings", "local-market"],
+              "query": [
+                {
+                  "key": "cif",
+                  "value": "{{testCif}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "❌ Error Scenarios",
+      "description": "Test error handling",
+      "item": [
+        {
+          "name": "Projection - Missing Required Fields",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"investmentAmount\": 50000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/calculate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "calculate"]
+            },
+            "description": "Missing required riskProfile field"
+          }
+        },
+        {
+          "name": "Projection - Invalid Amount",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"investmentAmount\": -1000,\n  \"currency\": \"SAR\",\n  \"timeHorizonMonths\": 12,\n  \"riskProfile\": \"Moderate\",\n  \"investmentType\": \"LumpSum\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/calculate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "calculate"]
+            }
+          }
+        },
+        {
+          "name": "Quick Estimate - Invalid Years",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/projection/quick-estimate?amount=50000&years=100",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "projection", "quick-estimate"],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "50000"
+                },
+                {
+                  "key": "years",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Years must be between 1 and 30"
+          }
+        },
+        {
+          "name": "Account Not Found",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 404', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/NONEXISTENT",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "accounts", "NONEXISTENT"]
+            }
+          }
+        },
+        {
+          "name": "Portfolio Not Found",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 404', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/portfolios/NONEXISTENT",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "portfolios", "NONEXISTENT"]
+            }
+          }
+        },
+        {
+          "name": "Invalid Agent Name",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Hello\",\n  \"agentName\": \"InvalidAgent\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/agents/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "agents", "chat"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

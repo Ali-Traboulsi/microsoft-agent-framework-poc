@@ -4,6 +4,8 @@ using AgentFrameworkQuickStart.Api.Hubs;
 using AgentFrameworkQuickStart.Api.Orchestration;
 using AgentFrameworkQuickStart.Api.SubAgents;
 using AgentFrameworkQuickStart.Api.Workflows;
+using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection;
+using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection.Executors;
 using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Tools;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
@@ -76,6 +78,15 @@ builder
             .AddSource("InvestmentBanking.MasterOrchestrator")
             .AddSource("InvestmentBanking.SubAgents")
             .AddSource("InvestmentBanking.Workflows")
+            // Profit Projection Workflow tracing
+            .AddSource("InvestmentBanking.ProfitProjection.Workflow")
+            .AddSource("InvestmentBanking.ProfitProjection.CustomerContext")
+            .AddSource("InvestmentBanking.ProfitProjection.HistoricalAnalyzer")
+            .AddSource("InvestmentBanking.ProfitProjection.MarketConditions")
+            .AddSource("InvestmentBanking.ProfitProjection.FundSelection")
+            .AddSource("InvestmentBanking.ProfitProjection.Aggregator")
+            .AddSource("InvestmentBanking.ProfitProjection.ScenarioBuilder")
+            .AddSource("InvestmentBanking.ProfitProjection.Recommendations")
             // ASP.NET Core automatic instrumentation
             .AddAspNetCoreInstrumentation(options =>
             {
@@ -117,6 +128,15 @@ builder
             .AddMeter("InvestmentBanking.MasterOrchestrator")
             .AddMeter("InvestmentBanking.SubAgents")
             .AddMeter("InvestmentBanking.Workflows")
+            // Profit Projection Workflow metrics
+            .AddMeter("InvestmentBanking.ProfitProjection.Workflow")
+            .AddMeter("InvestmentBanking.ProfitProjection.CustomerContext")
+            .AddMeter("InvestmentBanking.ProfitProjection.HistoricalAnalyzer")
+            .AddMeter("InvestmentBanking.ProfitProjection.MarketConditions")
+            .AddMeter("InvestmentBanking.ProfitProjection.FundSelection")
+            .AddMeter("InvestmentBanking.ProfitProjection.Aggregator")
+            .AddMeter("InvestmentBanking.ProfitProjection.ScenarioBuilder")
+            .AddMeter("InvestmentBanking.ProfitProjection.Recommendations")
             // ASP.NET Core runtime metrics
             .AddAspNetCoreInstrumentation()
             // HTTP client metrics
@@ -196,6 +216,26 @@ builder.Services.AddScoped<AccountTools>();
 builder.Services.AddScoped<PortfolioTools>();
 builder.Services.AddScoped<MutualFundTools>();
 builder.Services.AddScoped<WebSearchTools>();
+builder.Services.AddScoped<ProjectionTools>();
+
+// Register SNB Capital API Service (Singleton - shared HttpClient)
+builder.Services.AddHttpClient<SNBCapitalApiService>(client =>
+{
+    client.BaseAddress = new Uri("https://snbc-api.onrender.com/snbc/api/v1/");
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+});
+
+// Register Profit Projection Workflow Executors (Scoped)
+builder.Services.AddScoped<CustomerContextExecutor>();
+builder.Services.AddScoped<HistoricalAnalyzer>();
+builder.Services.AddScoped<MarketConditionsAnalyzer>();
+builder.Services.AddScoped<FundSelectionAnalyzer>();
+builder.Services.AddScoped<ResultsAggregator>();
+builder.Services.AddScoped<ScenarioBuilder>();
+builder.Services.AddScoped<RecommendationEngine>();
+
+// Register Profit Projection Workflow (Scoped)
+builder.Services.AddScoped<ProfitProjectionWorkflow>();
 
 // Register IChatClient using OpenAI (Scoped - one instance per request)
 builder.Services.AddScoped<IChatClient>(sp =>
@@ -280,6 +320,9 @@ app.MapGet(
                 MasterAgent = "/api/v2/masteragent",
                 MasterAgentHub = "/hubs/master",
 
+                // Profit Projection Workflow
+                ProfitProjection = "/api/projection",
+
                 // V1 - Legacy Individual Agents
                 Accounts = "/api/accounts",
                 Portfolios = "/api/portfolios",
@@ -297,6 +340,10 @@ app.MapGet(
                 "AccountServices - Account operations and management",
                 "ComplianceOfficer - Regulatory compliance and risk assessment",
             },
+            Workflows = new[]
+            {
+                "ProfitProjection - Calculate estimated returns with multiple scenarios",
+            },
         }
 );
 
@@ -306,6 +353,9 @@ Console.WriteLine("Swagger UI: http://localhost:5000/swagger");
 Console.WriteLine("\nV2 Endpoints (Master Orchestrator):");
 Console.WriteLine("  - REST API: http://localhost:5000/api/v2/masteragent");
 Console.WriteLine("  - SignalR: http://localhost:5000/hubs/master");
+Console.WriteLine("\nProfit Projection Workflow:");
+Console.WriteLine("  - POST: http://localhost:5000/api/projection/calculate");
+Console.WriteLine("  - GET:  http://localhost:5000/api/projection/quick-projection");
 Console.WriteLine("\nV1 Endpoints (Legacy Individual Agents):");
 Console.WriteLine("  - SignalR: http://localhost:5000/hubs/agent");
 Console.WriteLine("=========================================================\n");
