@@ -6,6 +6,7 @@ using System.Text.Json;
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.DTOs;
 using AgentFrameworkQuickStart.Api.Middleware;
+using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection.Messages;
 using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Tools;
 using Microsoft.Agents.AI;
@@ -47,6 +48,7 @@ public class MasterOrchestrator : IMasterOrchestrator
     private readonly WebSearchTools _webSearchTools;
     private readonly StructuredResponseHandler _structuredResponseHandler;
     private readonly AgentThreadManager _threadManager;
+    private readonly ProjectionTools _projectionTools;
 
     public MasterOrchestrator(
         IChatClient chatClient,
@@ -55,7 +57,8 @@ public class MasterOrchestrator : IMasterOrchestrator
         ILogger<MasterOrchestrator> logger,
         ILoggerFactory loggerFactory,
         StructuredResponseHandler structuredResponseHandler,
-        AgentThreadManager threadManager
+        AgentThreadManager threadManager,
+        ProjectionTools projectionTools
     )
     {
         _chatClient = chatClient;
@@ -65,6 +68,7 @@ public class MasterOrchestrator : IMasterOrchestrator
         _loggerFactory = loggerFactory;
         _structuredResponseHandler = structuredResponseHandler;
         _threadManager = threadManager;
+        _projectionTools = projectionTools;
         _subAgentLookup = subAgents.ToDictionary(sa => sa.Name, sa => sa);
         _masterAgent = new Lazy<AIAgent>(CreateMasterAgentWithMiddleware);
     }
@@ -415,12 +419,17 @@ public class MasterOrchestrator : IMasterOrchestrator
 
             _logger.LogInformation("Request completed in {Duration}ms", sw.ElapsedMilliseconds);
 
+            // Capture projection result if any was generated during this request
+            var projectionResult = _projectionTools.GetLastProjectionResult();
+            _projectionTools.ClearLastProjectionResult();
+
             return new OrchestratorResult
             {
                 Success = true,
                 Response = responseText,
                 SubAgentsUsed = subAgentsUsed,
                 TotalDurationMs = sw.ElapsedMilliseconds,
+                ProjectionResult = projectionResult,
             };
         }
         catch (Exception ex)
@@ -438,6 +447,9 @@ public class MasterOrchestrator : IMasterOrchestrator
                 conversationId,
                 ex.Message
             );
+
+            // Clear any partial projection result on error
+            _projectionTools.ClearLastProjectionResult();
 
             return new OrchestratorResult
             {
@@ -739,12 +751,17 @@ public class MasterOrchestrator : IMasterOrchestrator
                 conversationId
             );
 
+            // Capture projection result if any was generated during this request
+            var projectionResult = _projectionTools.GetLastProjectionResult();
+            _projectionTools.ClearLastProjectionResult();
+
             return new OrchestratorResult
             {
                 Success = true,
                 Response = responseText,
                 SubAgentsUsed = new List<string>(), // Will be populated by middleware events
                 TotalDurationMs = sw.ElapsedMilliseconds,
+                ProjectionResult = projectionResult,
             };
         }
         catch (Exception ex)
@@ -761,6 +778,9 @@ public class MasterOrchestrator : IMasterOrchestrator
                 conversationId,
                 ex.Message
             );
+
+            // Clear any partial projection result on error
+            _projectionTools.ClearLastProjectionResult();
 
             return new OrchestratorResult
             {

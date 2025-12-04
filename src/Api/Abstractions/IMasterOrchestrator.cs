@@ -1,6 +1,7 @@
 namespace AgentFrameworkQuickStart.Api.Abstractions;
 
 using AgentFrameworkQuickStart.Api.DTOs;
+using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection.Messages;
 
 /// <summary>
 /// Orchestrates multiple sub-agents and coordinates their activities
@@ -97,6 +98,17 @@ public class OrchestratorResult
     public List<string> SubAgentsUsed { get; init; } = new();
     public long TotalDurationMs { get; init; }
     public string? ErrorMessage { get; init; }
+
+    /// <summary>
+    /// Structured projection result if a projection was calculated
+    /// This allows the API to return structured data alongside the natural language response
+    /// </summary>
+    public ProjectionResult? ProjectionResult { get; init; }
+
+    /// <summary>
+    /// Indicates if the response contains structured projection data
+    /// </summary>
+    public bool HasProjectionResult => ProjectionResult != null;
 }
 
 /// <summary>

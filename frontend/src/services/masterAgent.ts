@@ -284,6 +284,36 @@ class MasterAgentService {
       return null;
     }
   }
+
+  /**
+   * Non-streaming chat that returns structured projection results
+   * Use this when you need access to projectionResult data
+   */
+  async chat(message: string, conversationId: string, enableThinking: boolean = false): Promise<ChatResponse> {
+    try {
+      const response = await fetch('/api/v2/MasterAgent/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message,
+          conversationId,
+          enableThinking,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to get response from Master Agent');
+      }
+
+      return response.json();
+    } catch (error: any) {
+      console.error('Error in chat:', error);
+      throw error;
+    }
+  }
 }
 
 export interface MultiModalResponse {
@@ -301,6 +331,120 @@ export interface MultiModalResponse {
 export interface ConversationStats {
   activeConversations: number;
   conversationIds: string[];
+}
+
+// Projection Result Types for structured responses
+export interface ProjectionResult {
+  projectionId: string;
+  inputSummary: {
+    amount: number;
+    currency: string;
+    horizon: string;
+    horizonAr: string;
+    riskProfile: string;
+    riskProfileAr: string;
+    investmentType: string;
+    shariahCompliant: boolean;
+  };
+  scenarios: {
+    conservative: ProjectionScenario;
+    expected: ProjectionScenario;
+    optimistic: ProjectionScenario;
+    strategyComparison?: StrategyComparison;
+  };
+  recommendedFunds: FundRecommendation[];
+  riskWarnings: string[];
+  riskWarningsAr: string[];
+  callToAction: {
+    primaryAction: string;
+    primaryActionAr: string;
+    link: string;
+    secondaryAction: string;
+    secondaryActionAr: string;
+    secondaryLink: string;
+  };
+  metadata: {
+    createdAt: string;
+    expiresAt: string;
+    workflowVersion: string;
+    executionTimeMs: number;
+    dataSources: string[];
+    customerId: string | null;
+    usedHistoricalData: boolean;
+    usedMarketData: boolean;
+  };
+}
+
+export interface ProjectionScenario {
+  scenarioType: string;
+  scenarioTypeAr: string;
+  confidence: number;
+  description: string;
+  descriptionAr: string;
+  assumedReturnRate: number;
+  initialInvestment: number;
+  projectedValue: number;
+  totalReturn: number;
+  annualizedReturn: number;
+  monthlyProjections: MonthlyProjection[];
+}
+
+export interface MonthlyProjection {
+  month: number;
+  date: string;
+  value: number;
+  cumulativeReturn: number;
+  monthlyContribution: number;
+}
+
+export interface StrategyComparison {
+  lumpSum: {
+    strategyName: string;
+    totalInvestment: number;
+    projectedValue: number;
+    totalReturn: number;
+    benefit: string;
+    benefitAr: string;
+  };
+  monthlySip: {
+    strategyName: string;
+    totalInvestment: number;
+    projectedValue: number;
+    totalReturn: number;
+    benefit: string;
+    benefitAr: string;
+  };
+  recommendedStrategy: string;
+  recommendationRationale: string;
+  recommendationRationaleAr: string;
+}
+
+export interface FundRecommendation {
+  fundCode: string;
+  fundName: string;
+  fundNameAr: string | null;
+  fundType: string;
+  allocationPercent: number;
+  investmentAmount: number;
+  expectedContribution: number;
+  expectedReturn: number;
+  reasons: string[];
+  currentNav: number;
+  isShariahCompliant: boolean;
+}
+
+export interface ChatResponse {
+  success: boolean;
+  data: {
+    success: boolean;
+    response: string;
+    subAgentsUsed: string[];
+    durationMs: number;
+    errorMessage: string | null;
+    projectionResult: ProjectionResult | null;
+    hasProjectionResult: boolean;
+  };
+  error: string | null;
 }
 
 export const masterAgentService = new MasterAgentService();

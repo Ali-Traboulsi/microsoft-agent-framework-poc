@@ -16,6 +16,9 @@ public class ProjectionTools
     private readonly ProfitProjectionWorkflow _workflow;
     private readonly ILogger<ProjectionTools> _logger;
 
+    // Store the last projection result for structured access
+    private ProjectionResult? _lastProjectionResult;
+
     // OpenTelemetry instrumentation
     private static readonly ActivitySource ActivitySource = new(
         "InvestmentBanking.Tools.Projection",
@@ -28,10 +31,102 @@ public class ProjectionTools
         "Number of tool invocations"
     );
 
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false,
+    };
+
     public ProjectionTools(ProfitProjectionWorkflow workflow, ILogger<ProjectionTools> logger)
     {
         _workflow = workflow;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Get the last projection result as a structured object
+    /// </summary>
+    public ProjectionResult? GetLastProjectionResult() => _lastProjectionResult;
+
+    /// <summary>
+    /// Clear the last projection result (should be called after reading it)
+    /// </summary>
+    public void ClearLastProjectionResult() => _lastProjectionResult = null;
+
+    /// <summary>
+    /// Execute projection and return the raw ProjectionResult object
+    /// </summary>
+    public async Task<ProjectionResult> ExecuteProjectionAsync(ProjectionRequest request)
+    {
+        var result = await _workflow.ExecuteAsync(request);
+        _lastProjectionResult = result;
+        return result;
+    }
+
+    /// <summary>
+    /// Calculate estimated profit projection for an investment and return structured JSON
+    /// احتساب الأرباح التقديرية للاستثمار
+    /// </summary>
+    [Description(
+        "Calculate profit projection and return structured JSON result. Use this for programmatic access to projection data. Returns complete projection with scenarios, fund recommendations, and metadata."
+    )]
+    public async Task<string> CalculateProfitProjectionStructured(
+        [Description("Investment amount in the specified currency (minimum 1000)")]
+            decimal investmentAmount,
+        [Description("Investment time horizon in months (e.g., 12 for 1 year, 36 for 3 years)")]
+            int timeHorizonMonths,
+        [Description(
+            "Risk profile: Conservative (low risk), Moderate (balanced), or Aggressive (high risk)"
+        )]
+            string riskProfile,
+        [Description("Currency code (default: SAR)")] string currency = "SAR",
+        [Description("Only include Sharia-compliant funds")] bool shariahCompliant = false,
+        [Description("Customer ID for personalized projection (optional)")]
+            string? customerId = null
+    )
+    {
+        using var activity = ActivitySource.StartActivity("CalculateProfitProjectionStructured");
+        ToolInvocationsCounter.Add(1);
+
+        try
+        {
+            _logger.LogInformation(
+                "Agent requested structured profit projection: {Amount} {Currency}, {Months} months, {Risk} profile",
+                investmentAmount,
+                currency,
+                timeHorizonMonths,
+                riskProfile
+            );
+
+            var request = new ProjectionRequest
+            {
+                InvestmentAmount = investmentAmount,
+                Currency = currency,
+                TimeHorizonMonths = timeHorizonMonths,
+                RiskProfile = NormalizeRiskProfile(riskProfile),
+                InvestmentType = "LumpSum",
+                ShariahCompliantOnly = shariahCompliant,
+                CustomerId = customerId,
+            };
+
+            var result = await ExecuteProjectionAsync(request);
+
+            // Return as JSON string for the agent to process
+            return JsonSerializer.Serialize(result, JsonOptions);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Invalid projection request");
+            return JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to calculate profit projection");
+            return JsonSerializer.Serialize(
+                new { error = $"Error calculating projection: {ex.Message}" },
+                JsonOptions
+            );
+        }
     }
 
     /// <summary>
@@ -83,7 +178,8 @@ public class ProjectionTools
                 ShariahCompliantOnly = shariahCompliant,
             };
 
-            var result = await _workflow.ExecuteAsync(request);
+            // Use ExecuteProjectionAsync to store result for structured access
+            var result = await ExecuteProjectionAsync(request);
 
             return FormatProjectionResult(result);
         }
@@ -138,7 +234,8 @@ public class ProjectionTools
                 CustomerId = customerId,
             };
 
-            var result = await _workflow.ExecuteAsync(request);
+            // Use ExecuteProjectionAsync to store result for structured access
+            var result = await ExecuteProjectionAsync(request);
 
             return FormatProjectionResult(result, includeCustomerContext: true);
         }
@@ -185,7 +282,8 @@ public class ProjectionTools
                 InvestmentType = "LumpSum", // Workflow will automatically compare
             };
 
-            var result = await _workflow.ExecuteAsync(request);
+            // Use ExecuteProjectionAsync to store result for structured access
+            var result = await ExecuteProjectionAsync(request);
 
             return FormatStrategyComparison(result);
         }

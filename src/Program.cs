@@ -249,6 +249,7 @@ builder.Services.AddScoped<ISubAgent, PortfolioManagerSubAgent>();
 builder.Services.AddScoped<ISubAgent, InvestmentAdvisorSubAgent>();
 builder.Services.AddScoped<ISubAgent, AccountServicesSubAgent>();
 builder.Services.AddScoped<ISubAgent, ComplianceOfficerSubAgent>();
+builder.Services.AddScoped<ISubAgent, ProfitProjectionSubAgent>();
 
 // Register helper classes for orchestration
 builder.Services.AddScoped<StructuredResponseHandler>();

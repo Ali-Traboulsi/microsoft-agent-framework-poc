@@ -1,6 +1,8 @@
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.DTOs;
 using AgentFrameworkQuickStart.Api.Helpers;
+using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection;
+using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection.Messages;
 using AgentFrameworkQuickStart.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,18 +16,21 @@ public class MasterAgentController : ControllerBase
     private readonly ILogger<MasterAgentController> _logger;
     private readonly AudioTranscriptionService _audioService;
     private readonly AgentThreadManager _threadManager;
+    private readonly ProfitProjectionWorkflow _projectionWorkflow;
 
     public MasterAgentController(
         IMasterOrchestrator orchestrator,
         ILogger<MasterAgentController> logger,
         AudioTranscriptionService audioService,
-        AgentThreadManager threadManager
+        AgentThreadManager threadManager,
+        ProfitProjectionWorkflow projectionWorkflow
     )
     {
         _orchestrator = orchestrator;
         _logger = logger;
         _audioService = audioService;
         _threadManager = threadManager;
+        _projectionWorkflow = projectionWorkflow;
     }
 
     [HttpPost("chat")]
@@ -54,6 +59,7 @@ public class MasterAgentController : ControllerBase
                         SubAgentsUsed = result.SubAgentsUsed,
                         DurationMs = result.TotalDurationMs,
                         ErrorMessage = result.ErrorMessage,
+                        ProjectionResult = result.ProjectionResult,
                     },
                     Error: null
                 )
@@ -104,6 +110,172 @@ public class MasterAgentController : ControllerBase
             _logger.LogError(ex, "Error in master agent structured chat");
             return Ok(new ApiResponse<StructuredOrchestratorResultDto>(false, null, ex.Message));
         }
+    }
+
+    /// <summary>
+    /// Calculate profit projection with structured response
+    /// This is the agentic entry point for profit projections - the Master Agent
+    /// routes projection requests here for structured data handling
+    /// </summary>
+    /// <remarks>
+    /// This endpoint provides structured projection results that can be easily
+    /// consumed by frontend applications. It supports:
+    /// - Natural language queries (will extract parameters)
+    /// - Direct parameter specification
+    /// - Customer-specific projections
+    /// - Shariah-compliant fund filtering
+    /// </remarks>
+    [HttpPost("projection")]
+    [ProducesResponseType(typeof(ApiResponse<ProjectionResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(
+        typeof(ApiResponse<ProjectionResponseDto>),
+        StatusCodes.Status400BadRequest
+    )]
+    public async Task<ActionResult<ApiResponse<ProjectionResponseDto>>> CalculateProjection(
+        [FromBody] ProjectionChatRequest request
+    )
+    {
+        var startTime = DateTime.UtcNow;
+
+        try
+        {
+            _logger.LogInformation(
+                "Master agent projection request: Amount={Amount}, Months={Months}, Risk={Risk}",
+                request.InvestmentAmount,
+                request.TimeHorizonMonths,
+                request.RiskProfile
+            );
+
+            // Validate required fields
+            if (request.InvestmentAmount <= 0)
+            {
+                return BadRequest(
+                    new ApiResponse<ProjectionResponseDto>(
+                        false,
+                        null,
+                        "Investment amount must be greater than 0"
+                    )
+                );
+            }
+
+            if (request.TimeHorizonMonths <= 0)
+            {
+                return BadRequest(
+                    new ApiResponse<ProjectionResponseDto>(
+                        false,
+                        null,
+                        "Time horizon must be greater than 0 months"
+                    )
+                );
+            }
+
+            // Build projection request
+            var projectionRequest = new ProjectionRequest
+            {
+                InvestmentAmount = request.InvestmentAmount,
+                Currency = request.Currency ?? "SAR",
+                TimeHorizonMonths = request.TimeHorizonMonths,
+                RiskProfile = NormalizeRiskProfile(request.RiskProfile ?? "Moderate"),
+                InvestmentType = request.InvestmentType ?? "LumpSum",
+                MonthlyAmount = request.MonthlyAmount,
+                CustomerId = request.CustomerId,
+                ShariahCompliantOnly = request.ShariahCompliantOnly ?? false,
+            };
+
+            // Execute workflow
+            var result = await _projectionWorkflow.ExecuteAsync(projectionRequest);
+
+            var processingTime = (DateTime.UtcNow - startTime).TotalMilliseconds;
+
+            // Build structured response
+            var response = new ProjectionResponseDto
+            {
+                Success = true,
+                ProjectionId = result.ProjectionId,
+                InputSummary = result.InputSummary,
+                Scenarios = result.Scenarios,
+                RecommendedFunds = result.RecommendedFunds,
+                RiskWarnings = result.RiskWarnings,
+                CallToAction = result.CallToAction,
+                Metadata = result.Metadata,
+                ProcessingTimeMs = (long)processingTime,
+                ConversationId = request.ConversationId ?? Guid.NewGuid().ToString(),
+            };
+
+            return Ok(new ApiResponse<ProjectionResponseDto>(true, response, null));
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Invalid projection request");
+            return BadRequest(new ApiResponse<ProjectionResponseDto>(false, null, ex.Message));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in master agent projection");
+            return StatusCode(
+                500,
+                new ApiResponse<ProjectionResponseDto>(false, null, $"Internal error: {ex.Message}")
+            );
+        }
+    }
+
+    /// <summary>
+    /// Natural language projection - ask in plain English/Arabic
+    /// The Master Agent will interpret the request and calculate projection
+    /// </summary>
+    [HttpPost("projection/chat")]
+    [ProducesResponseType(typeof(ApiResponse<ProjectionChatResponseDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApiResponse<ProjectionChatResponseDto>>> ProjectionChat(
+        [FromBody] MasterChatRequest request
+    )
+    {
+        var startTime = DateTime.UtcNow;
+
+        try
+        {
+            _logger.LogInformation("Master agent projection chat: {Message}", request.Message);
+
+            var conversationId = request.ConversationId ?? Guid.NewGuid().ToString();
+
+            // First, use the Master Agent to understand and delegate
+            var agentResult = await _orchestrator.ProcessRequestAsync(
+                $"[PROJECTION REQUEST] {request.Message}",
+                conversationId,
+                request.EnableThinking
+            );
+
+            var processingTime = (DateTime.UtcNow - startTime).TotalMilliseconds;
+
+            // Build response with both natural language and hint for structured data
+            var response = new ProjectionChatResponseDto
+            {
+                Success = agentResult.Success,
+                Response = agentResult.Response,
+                SubAgentsUsed = agentResult.SubAgentsUsed,
+                ProcessingTimeMs = (long)processingTime,
+                ConversationId = conversationId,
+                Hint =
+                    "For structured projection data, use POST /api/v2/MasterAgent/projection with specific parameters",
+            };
+
+            return Ok(new ApiResponse<ProjectionChatResponseDto>(true, response, null));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in projection chat");
+            return Ok(new ApiResponse<ProjectionChatResponseDto>(false, null, ex.Message));
+        }
+    }
+
+    private static string NormalizeRiskProfile(string input)
+    {
+        return input.ToLower() switch
+        {
+            "low" or "conservative" or "متحفظ" => "Conservative",
+            "medium" or "moderate" or "balanced" or "متوازن" => "Moderate",
+            "high" or "aggressive" or "جريء" => "Aggressive",
+            _ => "Moderate",
+        };
     }
 
     /// <summary>
@@ -425,6 +597,16 @@ public class OrchestratorResultDto
     public List<string> SubAgentsUsed { get; set; } = new();
     public long DurationMs { get; set; }
     public string? ErrorMessage { get; set; }
+
+    /// <summary>
+    /// Structured projection data when a profit projection was calculated
+    /// </summary>
+    public ProjectionResult? ProjectionResult { get; set; }
+
+    /// <summary>
+    /// Indicates whether the response contains structured projection data
+    /// </summary>
+    public bool HasProjectionResult => ProjectionResult != null;
 }
 
 public class SubAgentInfoDto

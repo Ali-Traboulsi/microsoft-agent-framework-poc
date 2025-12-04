@@ -1,17 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { masterAgentService } from '../services/masterAgent';
+import { masterAgentService, ProjectionResult } from '../services/masterAgent';
 import { FileUpload, UploadedFile } from './FileUpload';
 import { MessageContent } from './MessageContent';
+import { ProjectionResultCard } from './ProjectionResultCard';
 
 interface ChatMessage {
   id: string;
-  type: 'user' | 'agent' | 'thinking' | 'delegation' | 'tool' | 'telemetry' | 'multimodal' | 'transcription';
+  type: 'user' | 'agent' | 'thinking' | 'delegation' | 'tool' | 'telemetry' | 'multimodal' | 'transcription' | 'projection';
   content: string;
   timestamp: Date;
   subAgentName?: string;
   toolName?: string;
   metadata?: Record<string, any>;
   files?: UploadedFile[]; // For displaying user's uploaded files
+  projectionResult?: ProjectionResult; // For structured projection data
 }
 
 interface TelemetryData {
@@ -276,7 +278,54 @@ export const MasterAgentChat: React.FC = () => {
     let accumulatedThinking = '';
     let accumulatedContent = '';
 
+    // Check if this might be a projection request
+    const projectionKeywords = ['project', 'profit', 'return', 'invest', 'earning', 'calculate', 'estimate', 'forecast'];
+    const mightBeProjection = projectionKeywords.some(kw => userMessage.toLowerCase().includes(kw));
+
     try {
+      // If it might be a projection request, use REST API to get structured result
+      if (mightBeProjection) {
+        const response = await masterAgentService.chat(userMessage, conversationId.current, enableThinking);
+        
+        const duration = Date.now() - requestStart;
+        setTelemetry({
+          duration,
+          delegationCount: response.data.subAgentsUsed.length,
+          subAgentsUsed: response.data.subAgentsUsed,
+        });
+
+        // Add agent response
+        addMessage({
+          type: 'agent',
+          content: response.data.response,
+        });
+
+        // If we have projection data, add it as a separate visual card
+        if (response.data.hasProjectionResult && response.data.projectionResult) {
+          addMessage({
+            type: 'projection',
+            content: 'Projection Analysis Complete',
+            projectionResult: response.data.projectionResult,
+          });
+        }
+
+        // Add telemetry if enabled
+        if (showTelemetry) {
+          addMessage({
+            type: 'telemetry',
+            content: JSON.stringify({
+              duration,
+              delegations: response.data.subAgentsUsed.length,
+              subAgents: response.data.subAgentsUsed,
+              hasProjection: response.data.hasProjectionResult,
+            }, null, 2)
+          });
+        }
+        
+        return;
+      }
+
+      // Otherwise use streaming for regular chat
       for await (const chunk of masterAgentService.chatStream(userMessage, conversationId.current, enableThinking)) {
         if (chunk.isComplete) {
           // Final telemetry update
@@ -710,6 +759,12 @@ export const MasterAgentChat: React.FC = () => {
                 key={msg.id}
                 className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
               >
+                {/* Special rendering for projection results */}
+                {msg.type === 'projection' && msg.projectionResult ? (
+                  <div className="w-full max-w-5xl mx-auto">
+                    <ProjectionResultCard result={msg.projectionResult} />
+                  </div>
+                ) : (
                 <div className={`max-w-4xl ${msg.type === 'user' ? 'ml-auto' : 'mr-auto'} ${getMessageBubbleStyle(msg.type, msg.toolName)}`}>
                   {msg.type !== 'user' && getMessageIcon(msg.type, msg.toolName) && (
                     <div className="flex items-center gap-2 mb-2">
@@ -766,6 +821,7 @@ export const MasterAgentChat: React.FC = () => {
                     )}
                   </div>
                 </div>
+                )}
               </div>
             ))}
 

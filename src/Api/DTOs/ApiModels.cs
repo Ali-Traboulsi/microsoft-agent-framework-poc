@@ -1,3 +1,5 @@
+using ProjectionMessages = AgentFrameworkQuickStart.Api.Workflows.ProfitProjection.Messages;
+
 namespace AgentFrameworkQuickStart.Api.DTOs;
 
 public record ChatRequest(string Message, string AgentName);
@@ -132,3 +134,70 @@ public class MultiModalFormRequest
     /// </summary>
     public bool EnableThinking { get; set; } = false;
 }
+
+#region Projection DTOs
+
+/// <summary>
+/// Request for structured profit projection calculation
+/// </summary>
+public class ProjectionChatRequest
+{
+    /// <summary>Investment amount in the specified currency</summary>
+    public decimal InvestmentAmount { get; set; }
+
+    /// <summary>Currency code (SAR, USD, EUR). Default: SAR</summary>
+    public string? Currency { get; set; } = "SAR";
+
+    /// <summary>Investment time horizon in months</summary>
+    public int TimeHorizonMonths { get; set; }
+
+    /// <summary>Risk profile: Conservative, Moderate, or Aggressive</summary>
+    public string? RiskProfile { get; set; } = "Moderate";
+
+    /// <summary>Investment type: LumpSum or Monthly</summary>
+    public string? InvestmentType { get; set; } = "LumpSum";
+
+    /// <summary>Monthly investment amount (for Monthly/SIP type)</summary>
+    public decimal? MonthlyAmount { get; set; }
+
+    /// <summary>Customer ID (CIF) for personalized projections</summary>
+    public string? CustomerId { get; set; }
+
+    /// <summary>Only include Shariah-compliant funds</summary>
+    public bool? ShariahCompliantOnly { get; set; } = false;
+
+    /// <summary>Optional conversation ID for context</summary>
+    public string? ConversationId { get; set; }
+}
+
+/// <summary>
+/// Structured projection response with full projection data
+/// </summary>
+public class ProjectionResponseDto
+{
+    public bool Success { get; set; }
+    public string ProjectionId { get; set; } = "";
+    public ProjectionMessages.ProjectionSummary InputSummary { get; set; } = null!;
+    public ProjectionMessages.ScenarioSet Scenarios { get; set; } = null!;
+    public List<ProjectionMessages.FundRecommendation> RecommendedFunds { get; set; } = new();
+    public List<string> RiskWarnings { get; set; } = new();
+    public ProjectionMessages.CallToAction CallToAction { get; set; } = null!;
+    public ProjectionMessages.ProjectionMetadata Metadata { get; set; } = null!;
+    public long ProcessingTimeMs { get; set; }
+    public string ConversationId { get; set; } = "";
+}
+
+/// <summary>
+/// Response for natural language projection chat
+/// </summary>
+public class ProjectionChatResponseDto
+{
+    public bool Success { get; set; }
+    public string Response { get; set; } = "";
+    public List<string> SubAgentsUsed { get; set; } = new();
+    public long ProcessingTimeMs { get; set; }
+    public string ConversationId { get; set; } = "";
+    public string? Hint { get; set; }
+}
+
+#endregion
