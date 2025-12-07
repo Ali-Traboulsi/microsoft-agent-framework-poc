@@ -1,0 +1,38 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build output
+dist
+build
+
+# Development files
+.git
+.gitignore
+*.md
+LICENSE
+
+# IDE/Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment files (handled by Docker build args)
+.env
+.env.*
+!.env.example
+
+# Testing
+coverage
+.nyc_output
+
+# Misc
+.DS_Store
+Thumbs.db
+*.local

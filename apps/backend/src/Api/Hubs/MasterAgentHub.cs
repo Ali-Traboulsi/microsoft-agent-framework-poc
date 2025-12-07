@@ -3,7 +3,6 @@ using System.Text.Json;
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.DTOs;
 using AgentFrameworkQuickStart.Api.Helpers;
-using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection.Messages;
 using AgentFrameworkQuickStart.Core.Interfaces;
 using AgentFrameworkQuickStart.Models;
 using AgentFrameworkQuickStart.Services;
@@ -69,12 +68,6 @@ public class MasterAgentHub : Hub
         [EnumeratorCancellation] CancellationToken cancellationToken = default
     )
     {
-        _logger.LogInformation(
-            "Master agent streaming chat for {ConnectionId}, Conversation: {ConversationId}",
-            Context.ConnectionId,
-            conversationId
-        );
-
         await foreach (
             var response in _orchestrator
                 .ProcessRequestStreamingAsync(message, conversationId, enableThinking)
@@ -83,10 +76,6 @@ public class MasterAgentHub : Hub
         {
             if (cancellationToken.IsCancellationRequested)
             {
-                _logger.LogInformation(
-                    "Master agent streaming cancelled for {ConnectionId}",
-                    Context.ConnectionId
-                );
                 break;
             }
 
@@ -111,11 +100,6 @@ public class MasterAgentHub : Hub
                 ProjectionResult = response.ProjectionResult,
             };
         }
-
-        _logger.LogInformation(
-            "Master agent streaming completed for {ConnectionId}",
-            Context.ConnectionId
-        );
     }
 
     /// <summary>
@@ -207,18 +191,7 @@ public class MasterAgentHub : Hub
                 var audioBytes = Convert.FromBase64String(base64Data);
                 var fileName = content.FileName ?? "audio.mp3";
 
-                _logger.LogInformation(
-                    "Transcribing audio file {FileName} ({Size} bytes)",
-                    fileName,
-                    audioBytes.Length
-                );
-
                 var transcript = await _audioService.TranscribeAudioAsync(audioBytes, fileName);
-
-                _logger.LogInformation(
-                    "Transcription complete: {Transcript}",
-                    transcript.Substring(0, Math.Min(100, transcript.Length))
-                );
 
                 // Yield transcription result to frontend BEFORE processing
                 yield return new MasterStreamingResponse
@@ -246,29 +219,12 @@ public class MasterAgentHub : Hub
                 if (aiContent != null)
                 {
                     aiContents.Add(aiContent);
-                    _logger.LogInformation(
-                        "Added {ContentType} content for native multimodal AI processing",
-                        content.Type
-                    );
                 }
-                else
-                {
-                    _logger.LogWarning(
-                        "Unable to convert content: Type={Type}, MediaType={MediaType}",
-                        content.Type,
-                        content.MediaType
-                    );
-                }
+                else { }
             }
         }
 
         var conversationId = request.ConversationId ?? Guid.NewGuid().ToString();
-
-        _logger.LogInformation(
-            "Processing multi-modal request with {ContentCount} AIContent items for conversation {ConversationId}",
-            aiContents.Count,
-            conversationId
-        );
 
         // Use native multimodal streaming - AI model handles images, PDFs, documents directly
         await foreach (
@@ -283,10 +239,6 @@ public class MasterAgentHub : Hub
         {
             if (cancellationToken.IsCancellationRequested)
             {
-                _logger.LogInformation(
-                    "Master agent multi-modal streaming cancelled for {ConnectionId}",
-                    Context.ConnectionId
-                );
                 break;
             }
 
@@ -311,11 +263,6 @@ public class MasterAgentHub : Hub
                 ProjectionResult = response.ProjectionResult,
             };
         }
-
-        _logger.LogInformation(
-            "Master agent multi-modal streaming completed for {ConnectionId}",
-            Context.ConnectionId
-        );
     }
 
     /// <summary>
@@ -367,12 +314,6 @@ public class MasterAgentHub : Hub
                             SubAgentName = m.SubAgentName,
                         })
                         .ToList();
-
-                    _logger.LogInformation(
-                        "Loaded {MessageCount} prior messages for thread {ThreadId}",
-                        priorMessages.Count,
-                        actualThreadId
-                    );
                 }
             }
             else
@@ -509,11 +450,6 @@ public class MasterAgentHub : Hub
                 );
             }
         }
-
-        _logger.LogInformation(
-            "Master agent streaming completed for {ConnectionId}",
-            Context.ConnectionId
-        );
     }
 
     /// <summary>

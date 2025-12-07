@@ -353,6 +353,9 @@ app.UseAuthorization();
 
 app.MapControllers();
 
+// Health check endpoint for Docker/Kubernetes
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
+
 // SignalR Hubs
 app.MapHub<AgentHub>("/hubs/agent"); // Legacy individual agents
 app.MapHub<MasterAgentHub>("/hubs/master"); // New master orchestrator

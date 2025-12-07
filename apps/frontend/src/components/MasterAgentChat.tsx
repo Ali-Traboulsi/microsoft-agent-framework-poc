@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ChatMessage, TelemetryData } from '../interfaces/MasterAgentChat.interface';
 import { ProjectionResult } from '../interfaces/ProjectionResult.interface';
-import { masterAgentService, type MasterStreamResponse } from '../services/masterAgent';
+import { chatStreamMultiModal, chatStreamWithThread, clearConversation, connect, disconnect, type MasterStreamResponse } from '../services/masterAgent';
+import { ChatMessage, TelemetryData } from '../services/masterAgent/types';
 import { ChatThread, getThread, ThreadMessage } from '../services/threads';
 import { ProjectionResultCard } from './Cards/Projections/ProjectionResultCard';
 import { WorkflowProgressCard, WorkflowStep } from './Cards/WorkflowProgressCard';
@@ -17,7 +17,7 @@ export const MasterAgentChat: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [telemetry, setTelemetry] = useState<TelemetryData>({});
+  const [_telemetry, setTelemetry] = useState<TelemetryData>({});
   const [showTelemetry, setShowTelemetry] = useState(true);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [showFileUpload, setShowFileUpload] = useState(false);
@@ -25,7 +25,7 @@ export const MasterAgentChat: React.FC = () => {
   const [enableThinking, setEnableThinking] = useState(false);
   // Thread state
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
-  const [selectedThread, setSelectedThread] = useState<ChatThread | null>(null);
+  const [_selectedThread, setSelectedThread] = useState<ChatThread | null>(null);
   const [threadRefreshTrigger, setThreadRefreshTrigger] = useState(0);
   const [showThreadList, setShowThreadList] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -38,7 +38,7 @@ export const MasterAgentChat: React.FC = () => {
   }, [messages]);
 
   useEffect(() => {
-    masterAgentService.connect()
+    connect()
       .then(() => setConnectionError(null))
       .catch((error) => {
         console.error('SignalR connection error:', error);
@@ -46,7 +46,7 @@ export const MasterAgentChat: React.FC = () => {
       });
 
     return () => {
-      masterAgentService.disconnect().catch(console.error);
+      disconnect().catch(console.error);
     };
   }, []);
 
@@ -222,15 +222,16 @@ export const MasterAgentChat: React.FC = () => {
       contents.push(...fileContents);
 
       // Use streaming multimodal endpoint
-      for await (const chunk of masterAgentService.chatStreamMultiModal(contents, conversationId.current, enableThinking)) {
+      for await (const chunk of chatStreamMultiModal(contents, conversationId.current, enableThinking)) {
         if (chunk.isComplete) {
           const duration = Date.now() - requestStart;
+          const traceId = chunk.metadata?.traceId as string | undefined;
           setTelemetry({
             duration,
             delegationCount: delegationsUsed.length,
             subAgentsUsed: [...new Set(delegationsUsed)],
             toolsUsed: [...new Set(toolsUsed)],
-            traceId: chunk.metadata?.traceId
+            traceId
           });
 
           if (showTelemetry) {
@@ -241,7 +242,7 @@ export const MasterAgentChat: React.FC = () => {
                 delegations: delegationsUsed.length,
                 subAgents: [...new Set(delegationsUsed)],
                 tools: toolsUsed.length,
-                traceId: chunk.metadata?.traceId?.substring(0, 8)
+                traceId: traceId?.substring(0, 8)
               }, null, 2)
             });
           }
@@ -407,7 +408,7 @@ export const MasterAgentChat: React.FC = () => {
 
     try {
       // Use thread-aware streaming for persistence
-      for await (const chunk of masterAgentService.chatStreamWithThread(
+      for await (const chunk of chatStreamWithThread(
         userMessage, 
         currentThreadId,  // threadId first
         conversationId.current,  // then conversationId
@@ -436,12 +437,13 @@ export const MasterAgentChat: React.FC = () => {
         if (chunk.isComplete) {
           // Final telemetry update
           const duration = Date.now() - requestStart;
+          const traceId = chunk.metadata?.traceId as string | undefined;
           setTelemetry({
             duration,
             delegationCount: delegationsUsed.length,
             subAgentsUsed: [...new Set(delegationsUsed)],
             toolsUsed: [...new Set(toolsUsed)],
-            traceId: chunk.metadata?.traceId
+            traceId
           });
 
           // Check if we have a projection result in the Complete response
@@ -463,7 +465,7 @@ export const MasterAgentChat: React.FC = () => {
                 delegations: delegationsUsed.length,
                 subAgents: [...new Set(delegationsUsed)],
                 tools: toolsUsed.length,
-                traceId: chunk.metadata?.traceId?.substring(0, 8),
+                traceId: traceId?.substring(0, 8),
                 hasProjection: !!chunk.projectionResult
               }, null, 2)
             });
@@ -577,7 +579,7 @@ export const MasterAgentChat: React.FC = () => {
     }
 
     try {
-      await masterAgentService.clearConversation(conversationId.current);
+      await clearConversation(conversationId.current);
       
       // Generate new conversation ID
       conversationId.current = `conv-${Date.now()}`;
