@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.DTOs;
 using AgentFrameworkQuickStart.Api.Helpers;
+using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection.Messages;
 using AgentFrameworkQuickStart.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
@@ -91,6 +92,17 @@ public class MasterAgentHub : Hub
                 ToolName = response.ToolName,
                 IsComplete = response.Type == ResponseType.Complete,
                 Metadata = response.Metadata,
+                // Progress step fields
+                StepId = response.StepId,
+                StepName = response.StepName,
+                StepNameAr = response.StepNameAr,
+                StepNumber = response.StepNumber,
+                TotalSteps = response.TotalSteps,
+                StepCompleted = response.Type == ResponseType.StepComplete,
+                StepDurationMs = response.StepDurationMs,
+                StepDetails = response.StepDetails,
+                // Projection result (included in Complete response)
+                ProjectionResult = response.ProjectionResult,
             };
         }
 
@@ -280,6 +292,17 @@ public class MasterAgentHub : Hub
                 ToolName = response.ToolName,
                 IsComplete = response.Type == ResponseType.Complete,
                 Metadata = response.Metadata,
+                // Progress step fields
+                StepId = response.StepId,
+                StepName = response.StepName,
+                StepNameAr = response.StepNameAr,
+                StepNumber = response.StepNumber,
+                TotalSteps = response.TotalSteps,
+                StepCompleted = response.Type == ResponseType.StepComplete,
+                StepDurationMs = response.StepDurationMs,
+                StepDetails = response.StepDetails,
+                // Projection result (included in Complete response)
+                ProjectionResult = response.ProjectionResult,
             };
         }
 
@@ -311,17 +334,4 @@ public class MasterAgentHub : Hub
             yield return response;
         }
     }
-}
-
-/// <summary>
-/// Streaming response from master agent
-/// </summary>
-public class MasterStreamingResponse
-{
-    public required string Type { get; set; }
-    public string? Content { get; set; }
-    public string? SubAgentName { get; set; }
-    public string? ToolName { get; set; }
-    public bool IsComplete { get; set; }
-    public Dictionary<string, object>? Metadata { get; set; }
 }

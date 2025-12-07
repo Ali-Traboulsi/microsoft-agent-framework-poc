@@ -49,4 +49,13 @@ public static class AgentInstructionsLoader
 
         return template.Replace("{SUB_AGENT_DESCRIPTIONS}", subAgentDescriptions);
     }
+
+    /// <summary>
+    /// Load profit projection sub-agent instructions
+    /// </summary>
+    public static string LoadProjectionSubAgentInstructions()
+    {
+        var instructionsFile = Path.Combine(InstructionsPath, "ProjectionSubAgentInstructions.txt");
+        return File.ReadAllText(instructionsFile);
+    }
 }

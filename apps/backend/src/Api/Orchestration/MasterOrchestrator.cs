@@ -6,7 +6,6 @@ using System.Text.Json;
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.DTOs;
 using AgentFrameworkQuickStart.Api.Middleware;
-using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection.Messages;
 using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Tools;
 using Microsoft.Agents.AI;
@@ -589,15 +588,27 @@ public class MasterOrchestrator : IMasterOrchestrator
                 conversationId
             );
 
+            // Get projection result if one was calculated during this request
+            var projectionResult = _projectionTools.GetLastProjectionResult();
+
+            _logger.LogInformation(
+                "Projection result for conversation {ConversationId}: {HasResult}, ProjectionId: {ProjectionId}",
+                conversationId,
+                projectionResult != null,
+                projectionResult?.ProjectionId ?? "none"
+            );
+
             yield return new OrchestratorResponse
             {
                 Type = ResponseType.Complete,
                 Content = "",
+                ProjectionResult = projectionResult,
                 Metadata = new Dictionary<string, object>
                 {
                     ["traceId"] = activity?.TraceId.ToString() ?? "",
                     ["totalChunks"] = chunkCount,
                     ["responseLength"] = fullResponse.Length,
+                    ["hasProjectionResult"] = projectionResult != null,
                 },
             };
         }
@@ -680,6 +691,53 @@ public class MasterOrchestrator : IMasterOrchestrator
                 {
                     ["timestamp"] = delegationEvent.Timestamp,
                     ["error"] = delegationEvent.Error ?? "",
+                },
+            },
+            DelegationEventType.WorkflowStepStart => new OrchestratorResponse
+            {
+                Type = ResponseType.StepStart,
+                StepId = delegationEvent.StepId,
+                StepName = delegationEvent.StepName,
+                StepNameAr = delegationEvent.StepNameAr,
+                StepNumber = delegationEvent.StepNumber,
+                TotalSteps = delegationEvent.TotalSteps,
+                Content = $"⏳ {delegationEvent.StepName}",
+                Metadata = new Dictionary<string, object>
+                {
+                    ["timestamp"] = delegationEvent.Timestamp,
+                },
+            },
+            DelegationEventType.WorkflowStepComplete => new OrchestratorResponse
+            {
+                Type = ResponseType.StepComplete,
+                StepId = delegationEvent.StepId,
+                StepName = delegationEvent.StepName,
+                StepNameAr = delegationEvent.StepNameAr,
+                StepNumber = delegationEvent.StepNumber,
+                TotalSteps = delegationEvent.TotalSteps,
+                StepDurationMs = delegationEvent.StepDurationMs,
+                StepDetails = delegationEvent.StepDetails,
+                Content = $"✅ {delegationEvent.StepName}",
+                Metadata = new Dictionary<string, object>
+                {
+                    ["timestamp"] = delegationEvent.Timestamp,
+                    ["durationMs"] = delegationEvent.StepDurationMs ?? 0,
+                    ["details"] = delegationEvent.StepDetails ?? "",
+                },
+            },
+            DelegationEventType.WorkflowProgress => new OrchestratorResponse
+            {
+                Type = ResponseType.Progress,
+                StepId = delegationEvent.StepId,
+                StepName = delegationEvent.StepName,
+                StepNameAr = delegationEvent.StepNameAr,
+                StepNumber = delegationEvent.StepNumber,
+                TotalSteps = delegationEvent.TotalSteps,
+                StepDetails = delegationEvent.StepDetails,
+                Content = delegationEvent.StepDetails ?? $"📊 {delegationEvent.StepName}",
+                Metadata = new Dictionary<string, object>
+                {
+                    ["timestamp"] = delegationEvent.Timestamp,
                 },
             },
             _ => new OrchestratorResponse { Type = ResponseType.Content, Content = "" },
@@ -867,15 +925,20 @@ public class MasterOrchestrator : IMasterOrchestrator
             conversationId
         );
 
+        // Get projection result if one was calculated during this request
+        var projectionResult = _projectionTools.GetLastProjectionResult();
+
         yield return new OrchestratorResponse
         {
             Type = ResponseType.Complete,
             Content = contentBuilder.ToString(),
+            ProjectionResult = projectionResult,
             Metadata = new Dictionary<string, object>
             {
                 ["timestamp"] = DateTime.UtcNow,
                 ["totalDurationMs"] = elapsedMs,
                 ["contentCount"] = contents.Count,
+                ["hasProjectionResult"] = projectionResult != null,
             },
         };
     }

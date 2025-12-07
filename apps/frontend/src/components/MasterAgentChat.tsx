@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { masterAgentService, ProjectionResult } from '../services/masterAgent';
+import { masterAgentService, ProjectionResult, type MasterStreamResponse } from '../services/masterAgent';
+import { ProjectionResultCard } from './Cards/Projections/ProjectionResultCard';
+import { WorkflowProgressCard, WorkflowStep } from './Cards/WorkflowProgressCard';
 import { FileUpload, UploadedFile } from './FileUpload';
 import { MessageContent } from './MessageContent';
-import { ProjectionResultCard } from './ProjectionResultCard';
 
 interface ChatMessage {
   id: string;
-  type: 'user' | 'agent' | 'thinking' | 'delegation' | 'tool' | 'telemetry' | 'multimodal' | 'transcription' | 'projection';
+  type: 'user' | 'agent' | 'thinking' | 'delegation' | 'tool' | 'telemetry' | 'multimodal' | 'transcription' | 'projection' | 'workflow-progress';
   content: string;
   timestamp: Date;
   subAgentName?: string;
@@ -14,6 +15,7 @@ interface ChatMessage {
   metadata?: Record<string, any>;
   files?: UploadedFile[]; // For displaying user's uploaded files
   projectionResult?: ProjectionResult; // For structured projection data
+  workflowSteps?: WorkflowStep[]; // For workflow progress tracking
 }
 
 interface TelemetryData {
@@ -266,8 +268,61 @@ export const MasterAgentChat: React.FC = () => {
     }
   };
 
+  // Track workflow progress message ID for updates
+  const workflowProgressMessageIdRef = useRef<string | null>(null);
+
+  // Handle workflow progress events
+  const handleWorkflowProgress = (chunk: MasterStreamResponse) => {
+    if (!chunk.stepId || chunk.stepNumber === null || chunk.totalSteps === null) return;
+
+    const newStep: WorkflowStep = {
+      stepId: chunk.stepId,
+      stepName: chunk.stepName || chunk.stepId,
+      stepNameAr: chunk.stepNameAr || chunk.stepName || chunk.stepId,
+      stepNumber: chunk.stepNumber,
+      totalSteps: chunk.totalSteps,
+      isCompleted: chunk.type === 'StepComplete',
+      durationMs: chunk.stepDurationMs ?? undefined,
+      details: chunk.stepDetails ?? undefined,
+    };
+
+    if (!workflowProgressMessageIdRef.current) {
+      // Create new workflow progress message
+      const newId = `msg-workflow-${Date.now()}`;
+      workflowProgressMessageIdRef.current = newId;
+      setMessages(prev => [...prev, {
+        id: newId,
+        type: 'workflow-progress',
+        content: 'Processing...',
+        timestamp: new Date(),
+        workflowSteps: [newStep],
+      }]);
+    } else {
+      // Update existing workflow progress message
+      setMessages(prev => prev.map(msg => {
+        if (msg.id !== workflowProgressMessageIdRef.current) return msg;
+        
+        const existingSteps = msg.workflowSteps || [];
+        const stepIndex = existingSteps.findIndex(s => s.stepId === newStep.stepId);
+        
+        let updatedSteps: WorkflowStep[];
+        if (stepIndex >= 0) {
+          // Update existing step
+          updatedSteps = [...existingSteps];
+          updatedSteps[stepIndex] = newStep;
+        } else {
+          // Add new step
+          updatedSteps = [...existingSteps, newStep];
+        }
+        
+        return { ...msg, workflowSteps: updatedSteps };
+      }));
+    }
+  };
+
   const handleStreamingChat = async (userMessage: string) => {
-    // Reset telemetry
+    // Reset telemetry and workflow progress
+    workflowProgressMessageIdRef.current = null;
     const requestStart = Date.now();
     const delegationsUsed: string[] = [];
     const toolsUsed: string[] = [];
@@ -278,55 +333,19 @@ export const MasterAgentChat: React.FC = () => {
     let accumulatedThinking = '';
     let accumulatedContent = '';
 
-    // Check if this might be a projection request
-    const projectionKeywords = ['project', 'profit', 'return', 'invest', 'earning', 'calculate', 'estimate', 'forecast'];
-    const mightBeProjection = projectionKeywords.some(kw => userMessage.toLowerCase().includes(kw));
-
     try {
-      // If it might be a projection request, use REST API to get structured result
-      if (mightBeProjection) {
-        const response = await masterAgentService.chat(userMessage, conversationId.current, enableThinking);
-        
-        const duration = Date.now() - requestStart;
-        setTelemetry({
-          duration,
-          delegationCount: response.data.subAgentsUsed.length,
-          subAgentsUsed: response.data.subAgentsUsed,
-        });
-
-        // Add agent response
-        addMessage({
-          type: 'agent',
-          content: response.data.response,
-        });
-
-        // If we have projection data, add it as a separate visual card
-        if (response.data.hasProjectionResult && response.data.projectionResult) {
-          addMessage({
-            type: 'projection',
-            content: 'Projection Analysis Complete',
-            projectionResult: response.data.projectionResult,
-          });
-        }
-
-        // Add telemetry if enabled
-        if (showTelemetry) {
-          addMessage({
-            type: 'telemetry',
-            content: JSON.stringify({
-              duration,
-              delegations: response.data.subAgentsUsed.length,
-              subAgents: response.data.subAgentsUsed,
-              hasProjection: response.data.hasProjectionResult,
-            }, null, 2)
-          });
-        }
-        
-        return;
-      }
-
-      // Otherwise use streaming for regular chat
+      // Use streaming for all requests (including projections with progress tracking)
       for await (const chunk of masterAgentService.chatStream(userMessage, conversationId.current, enableThinking)) {
+        // Debug: Log Complete chunks to see if projectionResult is present
+        if (chunk.isComplete) {
+          console.log('📊 Complete chunk received:', {
+            type: chunk.type,
+            hasProjectionResult: !!chunk.projectionResult,
+            projectionResult: chunk.projectionResult,
+            metadata: chunk.metadata
+          });
+        }
+        
         if (chunk.isComplete) {
           // Final telemetry update
           const duration = Date.now() - requestStart;
@@ -337,6 +356,16 @@ export const MasterAgentChat: React.FC = () => {
             toolsUsed: [...new Set(toolsUsed)],
             traceId: chunk.metadata?.traceId
           });
+
+          // Check if we have a projection result in the Complete response
+          if (chunk.projectionResult) {
+            console.log('✅ Adding projection message with result:', chunk.projectionResult.projectionId);
+            addMessage({
+              type: 'projection',
+              content: 'Projection Analysis Complete',
+              projectionResult: chunk.projectionResult,
+            });
+          }
           
           // Add telemetry message
           if (showTelemetry) {
@@ -347,7 +376,8 @@ export const MasterAgentChat: React.FC = () => {
                 delegations: delegationsUsed.length,
                 subAgents: [...new Set(delegationsUsed)],
                 tools: toolsUsed.length,
-                traceId: chunk.metadata?.traceId?.substring(0, 8)
+                traceId: chunk.metadata?.traceId?.substring(0, 8),
+                hasProjection: !!chunk.projectionResult
               }, null, 2)
             });
           }
@@ -432,6 +462,13 @@ export const MasterAgentChat: React.FC = () => {
                   : msg
               ));
             }
+            break;
+
+          case 'StepStart':
+          case 'StepComplete':
+          case 'Progress':
+            // Handle workflow progress events
+            handleWorkflowProgress(chunk);
             break;
         }
       }
@@ -763,6 +800,10 @@ export const MasterAgentChat: React.FC = () => {
                 {msg.type === 'projection' && msg.projectionResult ? (
                   <div className="w-full max-w-5xl mx-auto">
                     <ProjectionResultCard result={msg.projectionResult} />
+                  </div>
+                ) : msg.type === 'workflow-progress' && msg.workflowSteps ? (
+                  <div className="w-full max-w-3xl mx-auto">
+                    <WorkflowProgressCard steps={msg.workflowSteps} />
                   </div>
                 ) : (
                 <div className={`max-w-4xl ${msg.type === 'user' ? 'ml-auto' : 'mr-auto'} ${getMessageBubbleStyle(msg.type, msg.toolName)}`}>

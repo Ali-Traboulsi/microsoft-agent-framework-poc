@@ -2,8 +2,12 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Text.Json;
+using System.Threading.Channels;
+using AgentFrameworkQuickStart.Api.Abstractions;
+using AgentFrameworkQuickStart.Api.Middleware;
 using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection;
 using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection.Messages;
+using AgentFrameworkQuickStart.Tools.Formatters;
 
 namespace AgentFrameworkQuickStart.Tools;
 
@@ -14,6 +18,7 @@ namespace AgentFrameworkQuickStart.Tools;
 public class ProjectionTools
 {
     private readonly ProfitProjectionWorkflow _workflow;
+    private readonly StreamingProfitProjectionWorkflow _streamingWorkflow;
     private readonly ILogger<ProjectionTools> _logger;
 
     // Store the last projection result for structured access
@@ -37,9 +42,14 @@ public class ProjectionTools
         WriteIndented = false,
     };
 
-    public ProjectionTools(ProfitProjectionWorkflow workflow, ILogger<ProjectionTools> logger)
+    public ProjectionTools(
+        ProfitProjectionWorkflow workflow,
+        StreamingProfitProjectionWorkflow streamingWorkflow,
+        ILogger<ProjectionTools> logger
+    )
     {
         _workflow = workflow;
+        _streamingWorkflow = streamingWorkflow;
         _logger = logger;
     }
 
@@ -298,7 +308,7 @@ public class ProjectionTools
     /// Get quick projection estimate without full workflow
     /// </summary>
     [Description(
-        "Get a quick estimate of potential returns. This is faster but less detailed than the full projection."
+        "Get a quick estimate of potential returns. Faster but less detailed than full projection."
     )]
     public string GetQuickEstimate(
         [Description("Investment amount")] decimal amount,
@@ -307,35 +317,161 @@ public class ProjectionTools
     )
     {
         ToolInvocationsCounter.Add(1);
+        return ProjectionFormatter.FormatQuickEstimate(amount, years, riskLevel);
+    }
 
-        // Quick estimate based on historical averages
-        var annualReturn = riskLevel.ToLower() switch
+    /// <summary>
+    /// Execute streaming projection with real-time progress updates.
+    /// Progress events are emitted via DelegationEventMiddleware for UI consumption.
+    /// </summary>
+    /// <param name="request">The projection request parameters</param>
+    /// <param name="conversationId">The conversation ID for routing progress events</param>
+    /// <returns>IAsyncEnumerable of progress events with the final result</returns>
+    public async IAsyncEnumerable<WorkflowProgressEvent> ExecuteStreamingProjectionAsync(
+        ProjectionRequest request,
+        string conversationId
+    )
+    {
+        using var activity = ActivitySource.StartActivity("ExecuteStreamingProjection");
+        ToolInvocationsCounter.Add(1);
+
+        _logger.LogInformation(
+            "Starting streaming projection for conversation {ConversationId}: {Amount} {Currency}, {Months} months",
+            conversationId,
+            request.InvestmentAmount,
+            request.Currency,
+            request.TimeHorizonMonths
+        );
+
+        ProjectionResult? result = null;
+        Exception? error = null;
+
+        var channelReader = _streamingWorkflow.ExecuteWithProgressAsync(
+            request,
+            onComplete: r =>
+            {
+                result = r;
+                _lastProjectionResult = r;
+                _logger.LogInformation(
+                    "Projection result captured: {ProjectionId}",
+                    r.ProjectionId
+                );
+            },
+            onError: ex => error = ex
+        );
+
+        // Stream progress events
+        await foreach (var progressEvent in channelReader.ReadAllAsync())
         {
-            "low" or "conservative" => 0.05m, // 5%
-            "medium" or "moderate" => 0.08m, // 8%
-            "high" or "aggressive" => 0.12m, // 12%
-            _ => 0.07m, // 7% default
-        };
+            // Emit to middleware for SignalR forwarding
+            DelegationEventMiddleware.EmitWorkflowProgressEvent(
+                conversationId,
+                progressEvent.StepId,
+                progressEvent.StepName,
+                progressEvent.StepNameAr,
+                progressEvent.StepNumber,
+                progressEvent.TotalSteps,
+                progressEvent.IsCompleted,
+                progressEvent.DurationMs,
+                progressEvent.Details
+            );
 
-        var futureValue = amount * (decimal)Math.Pow((double)(1 + annualReturn), years);
-        var totalReturn = futureValue - amount;
-        var percentReturn = (totalReturn / amount) * 100;
+            yield return progressEvent;
+        }
 
-        return $@"## Quick Investment Estimate
+        if (error != null)
+        {
+            _logger.LogError(error, "Streaming projection failed");
+            throw error;
+        }
 
-**Investment Details:**
-- Amount: {amount:N0} SAR
-- Duration: {years} year(s)
-- Risk Level: {riskLevel}
+        _logger.LogInformation(
+            "Streaming projection completed: {ProjectionId}",
+            result?.ProjectionId
+        );
+    }
 
-**Estimated Results (based on historical averages):**
-- Projected Value: **{futureValue:N0} SAR**
-- Total Return: **{totalReturn:N0} SAR** ({percentReturn:N1}%)
-- Assumed Annual Return: {annualReturn * 100:N1}%
+    /// <summary>
+    /// Calculate projection with progress streaming for UI.
+    /// This is the tool-callable version that returns the final result.
+    /// Progress events are automatically streamed to the UI via middleware.
+    /// </summary>
+    [Description(
+        "Calculate profit projection with real-time progress updates. Shows step-by-step progress in the UI. Prefer this method over CalculateProfitProjection for interactive responses."
+    )]
+    public async Task<string> CalculateProfitProjectionWithProgress(
+        [Description("Investment amount in the specified currency (minimum 1000)")]
+            decimal investmentAmount,
+        [Description("Investment time horizon in months (e.g., 12 for 1 year, 36 for 3 years)")]
+            int timeHorizonMonths,
+        [Description(
+            "Risk profile: Conservative (low risk), Moderate (balanced), or Aggressive (high risk)"
+        )]
+            string riskProfile,
+        [Description("Currency code (default: SAR)")] string currency = "SAR",
+        [Description("Only include Sharia-compliant funds")] bool shariahCompliant = false,
+        [Description("Customer ID for personalized projection (optional)")]
+            string? customerId = null
+    )
+    {
+        using var activity = ActivitySource.StartActivity("CalculateProfitProjectionWithProgress");
+        ToolInvocationsCounter.Add(1);
 
-⚠️ *This is a quick estimate. For detailed projections with fund recommendations, use the full profit projection tool.*
+        // Get conversation ID from middleware context for progress streaming
+        var conversationId =
+            DelegationEventMiddleware.CurrentConversationId ?? Guid.NewGuid().ToString();
 
-Would you like me to run a detailed projection analysis?";
+        try
+        {
+            _logger.LogInformation(
+                "Agent requested streaming profit projection: {Amount} {Currency}, {Months} months, {Risk} profile",
+                investmentAmount,
+                currency,
+                timeHorizonMonths,
+                riskProfile
+            );
+
+            var request = new ProjectionRequest
+            {
+                InvestmentAmount = investmentAmount,
+                Currency = currency,
+                TimeHorizonMonths = timeHorizonMonths,
+                RiskProfile = NormalizeRiskProfile(riskProfile),
+                InvestmentType = "LumpSum",
+                ShariahCompliantOnly = shariahCompliant,
+                CustomerId = customerId,
+            };
+
+            // Consume all progress events (they're emitted to middleware for UI)
+            await foreach (var _ in ExecuteStreamingProjectionAsync(request, conversationId))
+            {
+                // Progress events are automatically emitted to SignalR via middleware
+            }
+
+            _logger.LogInformation(
+                "CalculateProfitProjectionWithProgress completed. LastProjectionResult: {HasResult}, ID: {Id}",
+                _lastProjectionResult != null,
+                _lastProjectionResult?.ProjectionId ?? "null"
+            );
+
+            // Return the formatted result
+            if (_lastProjectionResult != null)
+            {
+                return FormatProjectionResult(_lastProjectionResult);
+            }
+
+            return "Error: Projection completed but no result was generated.";
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Invalid projection request");
+            return $"Error: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to calculate streaming profit projection");
+            return $"Error calculating projection: {ex.Message}";
+        }
     }
 
     private string NormalizeRiskProfile(string input)
@@ -352,131 +488,8 @@ Would you like me to run a detailed projection analysis?";
     private string FormatProjectionResult(
         ProjectionResult result,
         bool includeCustomerContext = false
-    )
-    {
-        var summary = result.InputSummary;
-        var scenarios = result.Scenarios;
+    ) => ProjectionFormatter.FormatResult(result, includeCustomerContext);
 
-        var output =
-            $@"## 📊 Profit Projection Results
-### احتساب الأرباح التقديرية
-
-**Projection ID:** {result.ProjectionId}
-
----
-
-### Investment Summary
-| Parameter | Value |
-|-----------|-------|
-| Investment Amount | {summary.Amount:N0} {summary.Currency} |
-| Time Horizon | {summary.Horizon} ({summary.HorizonAr}) |
-| Risk Profile | {summary.RiskProfile} ({summary.RiskProfileAr}) |
-| Investment Type | {summary.InvestmentType} |
-| Sharia Compliant | {(summary.ShariahCompliant ? "Yes ✓" : "No")} |
-
----
-
-### 📈 Projection Scenarios
-
-#### 🟢 Conservative Scenario ({scenarios.Conservative.Confidence}% Confidence)
-- **Projected Value:** {scenarios.Conservative.ProjectedValue:N0} {summary.Currency}
-- **Total Return:** {scenarios.Conservative.TotalReturn:N0} {summary.Currency}
-- **Annualized Return:** {scenarios.Conservative.AnnualizedReturn:N1}%
-- *{scenarios.Conservative.DescriptionAr}*
-
-#### 🟡 Expected Scenario ({scenarios.Expected.Confidence}% Confidence)
-- **Projected Value:** {scenarios.Expected.ProjectedValue:N0} {summary.Currency}
-- **Total Return:** {scenarios.Expected.TotalReturn:N0} {summary.Currency}
-- **Annualized Return:** {scenarios.Expected.AnnualizedReturn:N1}%
-- *{scenarios.Expected.DescriptionAr}*
-
-#### 🔵 Optimistic Scenario ({scenarios.Optimistic.Confidence}% Confidence)
-- **Projected Value:** {scenarios.Optimistic.ProjectedValue:N0} {summary.Currency}
-- **Total Return:** {scenarios.Optimistic.TotalReturn:N0} {summary.Currency}
-- **Annualized Return:** {scenarios.Optimistic.AnnualizedReturn:N1}%
-- *{scenarios.Optimistic.DescriptionAr}*
-
----
-
-### 💼 Recommended Fund Allocation
-
-| Fund | Allocation | Investment | Expected Return |
-|------|------------|------------|-----------------|";
-
-        foreach (var fund in result.RecommendedFunds.Take(5))
-        {
-            output +=
-                $@"
-| {fund.FundName} | {fund.AllocationPercent:N1}% | {fund.InvestmentAmount:N0} SAR | {fund.ExpectedReturn:N1}% |";
-        }
-
-        output +=
-            $@"
-
----
-
-### ⚠️ Important Notes
-";
-        foreach (var warning in result.RiskWarnings.Take(3))
-        {
-            output += $"- {warning}\n";
-        }
-
-        output +=
-            $@"
----
-
-### 🚀 Next Steps
-**{result.CallToAction.PrimaryAction}** ({result.CallToAction.PrimaryActionAr})
-
-*Projection generated at {result.Metadata.CreatedAt:yyyy-MM-dd HH:mm} UTC*
-*Valid until {result.Metadata.ExpiresAt:yyyy-MM-dd}*";
-
-        return output;
-    }
-
-    private string FormatStrategyComparison(ProjectionResult result)
-    {
-        var comparison = result.Scenarios.StrategyComparison;
-        if (comparison == null)
-        {
-            return "Strategy comparison not available for this projection.";
-        }
-
-        return $@"## 📊 Investment Strategy Comparison
-
-### Lump Sum vs Monthly SIP Analysis
-
----
-
-### 💰 Lump Sum Investment
-- **Total Investment:** {comparison.LumpSum.TotalInvestment:N0} SAR
-- **Projected Value:** {comparison.LumpSum.ProjectedValue:N0} SAR
-- **Total Return:** {comparison.LumpSum.TotalReturn:N0} SAR
-- **Benefit:** {comparison.LumpSum.Benefit}
-- **فائدة:** {comparison.LumpSum.BenefitAr}
-
----
-
-### 📅 Monthly SIP (Systematic Investment Plan)
-- **Total Investment:** {comparison.MonthlySip.TotalInvestment:N0} SAR
-- **Projected Value:** {comparison.MonthlySip.ProjectedValue:N0} SAR
-- **Total Return:** {comparison.MonthlySip.TotalReturn:N0} SAR
-- **Benefit:** {comparison.MonthlySip.Benefit}
-- **فائدة:** {comparison.MonthlySip.BenefitAr}
-
----
-
-### ✅ Recommendation: **{comparison.RecommendedStrategy}**
-
-{comparison.RecommendationRationale}
-
-{comparison.RecommendationRationaleAr}
-
----
-
-**Difference:** {Math.Abs(comparison.LumpSum.ProjectedValue - comparison.MonthlySip.ProjectedValue):N0} SAR
-
-Would you like to proceed with one of these strategies?";
-    }
+    private string FormatStrategyComparison(ProjectionResult result) =>
+        ProjectionFormatter.FormatStrategyComparison(result);
 }

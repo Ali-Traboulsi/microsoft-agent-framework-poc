@@ -169,6 +169,43 @@ public class DelegationEventMiddleware
     }
 
     /// <summary>
+    /// Emit a workflow progress event (public method for external callers)
+    /// </summary>
+    public static void EmitWorkflowProgressEvent(
+        string conversationId,
+        string stepId,
+        string stepName,
+        string stepNameAr,
+        int stepNumber,
+        int totalSteps,
+        bool isCompleted,
+        long? durationMs = null,
+        string? details = null
+    )
+    {
+        var eventType = isCompleted
+            ? DelegationEventType.WorkflowStepComplete
+            : DelegationEventType.WorkflowStepStart;
+
+        EmitEvent(
+            conversationId,
+            new DelegationEvent
+            {
+                Type = eventType,
+                StepId = stepId,
+                StepName = stepName,
+                StepNameAr = stepNameAr,
+                StepNumber = stepNumber,
+                TotalSteps = totalSteps,
+                StepCompleted = isCompleted,
+                StepDurationMs = durationMs,
+                StepDetails = details,
+                Timestamp = DateTime.UtcNow,
+            }
+        );
+    }
+
+    /// <summary>
     /// Get all events for a conversation and clear them
     /// </summary>
     public static IEnumerable<DelegationEvent> GetAndClearEvents(string conversationId)
@@ -222,6 +259,16 @@ public class DelegationEvent
     public DateTime Timestamp { get; set; }
     public string? Result { get; set; }
     public string? Error { get; set; }
+
+    // Workflow progress fields
+    public string? StepId { get; set; }
+    public string? StepName { get; set; }
+    public string? StepNameAr { get; set; }
+    public int? StepNumber { get; set; }
+    public int? TotalSteps { get; set; }
+    public bool? StepCompleted { get; set; }
+    public long? StepDurationMs { get; set; }
+    public string? StepDetails { get; set; }
 }
 
 /// <summary>
@@ -235,4 +282,7 @@ public enum DelegationEventType
     ToolExecutionStart,
     ToolExecutionComplete,
     ToolExecutionError,
+    WorkflowStepStart,
+    WorkflowStepComplete,
+    WorkflowProgress,
 }

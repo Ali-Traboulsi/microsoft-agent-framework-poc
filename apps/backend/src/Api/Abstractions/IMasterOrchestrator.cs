@@ -133,6 +133,18 @@ public class OrchestratorResponse
     public string? SubAgentName { get; init; }
     public string? ToolName { get; init; }
     public Dictionary<string, object>? Metadata { get; init; }
+
+    // Workflow progress fields (for StepStart, StepComplete, Progress types)
+    public string? StepId { get; init; }
+    public string? StepName { get; init; }
+    public string? StepNameAr { get; init; }
+    public int? StepNumber { get; init; }
+    public int? TotalSteps { get; init; }
+    public long? StepDurationMs { get; init; }
+    public string? StepDetails { get; init; }
+
+    // Projection result (included in Complete response when projection was calculated)
+    public ProjectionResult? ProjectionResult { get; init; }
 }
 
 /// <summary>
@@ -179,4 +191,49 @@ public enum ResponseType
     /// An error occurred
     /// </summary>
     Error,
+
+    /// <summary>
+    /// A workflow step is starting (shows progress)
+    /// </summary>
+    StepStart,
+
+    /// <summary>
+    /// A workflow step has completed
+    /// </summary>
+    StepComplete,
+
+    /// <summary>
+    /// General progress update during workflow execution
+    /// </summary>
+    Progress,
+}
+
+/// <summary>
+/// Progress event for workflow step tracking
+/// </summary>
+public record WorkflowProgressEvent
+{
+    /// <summary>Step identifier (e.g., "CustomerContext", "HistoricalAnalysis")</summary>
+    public required string StepId { get; init; }
+
+    /// <summary>Human-readable step name in English</summary>
+    public required string StepName { get; init; }
+
+    /// <summary>Human-readable step name in Arabic</summary>
+    public required string StepNameAr { get; init; }
+
+    /// <summary>Current step number (1-based)</summary>
+    public int StepNumber { get; init; }
+
+    /// <summary>Total number of steps in workflow</summary>
+    public int TotalSteps { get; init; }
+
+    /// <summary>Whether this step has completed</summary>
+    public bool IsCompleted { get; init; }
+
+    /// <summary>Duration of this step in milliseconds (set when completed)</summary>
+    public long? DurationMs { get; init; }
+
+    /// <summary>Optional details about what was done</summary>
+    public string? Details { get; init; }
 }

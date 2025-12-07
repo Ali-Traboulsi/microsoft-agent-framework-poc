@@ -7,7 +7,21 @@ interface MasterStreamResponse {
   toolName: string | null;
   isComplete: boolean;
   metadata: Record<string, any> | null;
+  // Workflow progress fields
+  stepId: string | null;
+  stepName: string | null;
+  stepNameAr: string | null;
+  stepNumber: number | null;
+  totalSteps: number | null;
+  stepCompleted: boolean | null;
+  stepDurationMs: number | null;
+  stepDetails: string | null;
+  // Projection result (included in Complete response for projection requests)
+  projectionResult: ProjectionResult | null;
 }
+
+// Export the type for use in components
+export type { MasterStreamResponse };
 
 interface ContentInput {
   Type: 'text' | 'image' | 'audio' | 'uri' | 'file';

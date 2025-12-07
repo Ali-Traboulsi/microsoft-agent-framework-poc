@@ -6,6 +6,7 @@ using AgentFrameworkQuickStart.Api.SubAgents;
 using AgentFrameworkQuickStart.Api.Workflows;
 using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection;
 using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection.Executors;
+using AgentFrameworkQuickStart.Infrastructure.ExternalApis;
 using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Tools;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
@@ -29,12 +30,22 @@ Console.WriteLine($"🔧 Using OpenAI with model: gpt-4o (with vision support)")
 
 // Add services to container
 builder.Services.AddControllers();
-builder.Services.AddSignalR(options =>
-{
-    // Increase message size limit for multimodal content (base64-encoded files)
-    // Default is 32KB, increase to 100MB to support large audio/image files
-    options.MaximumReceiveMessageSize = 100 * 1024 * 1024; // 100MB
-});
+builder
+    .Services.AddSignalR(options =>
+    {
+        // Increase message size limit for multimodal content (base64-encoded files)
+        // Default is 32KB, increase to 100MB to support large audio/image files
+        options.MaximumReceiveMessageSize = 100 * 1024 * 1024; // 100MB
+    })
+    .AddJsonProtocol(options =>
+    {
+        // Use camelCase for SignalR JSON serialization (matches JavaScript conventions)
+        options.PayloadSerializerOptions.PropertyNamingPolicy = System
+            .Text
+            .Json
+            .JsonNamingPolicy
+            .CamelCase;
+    });
 
 // Add HttpClient for web search
 builder.Services.AddHttpClient();
@@ -225,6 +236,9 @@ builder.Services.AddHttpClient<SNBCapitalApiService>(client =>
     client.DefaultRequestHeaders.Add("Accept", "application/json");
 });
 
+// Register SNB Capital API Adapter (Clean Architecture abstraction)
+builder.Services.AddScoped<ISNBCapitalApi, SNBCapitalApiAdapter>();
+
 // Register Profit Projection Workflow Executors (Scoped)
 builder.Services.AddScoped<CustomerContextExecutor>();
 builder.Services.AddScoped<HistoricalAnalyzer>();
@@ -236,9 +250,10 @@ builder.Services.AddScoped<RecommendationEngine>();
 
 // Register Profit Projection Workflow (Scoped)
 builder.Services.AddScoped<ProfitProjectionWorkflow>();
+builder.Services.AddScoped<StreamingProfitProjectionWorkflow>();
 
 // Register IChatClient using OpenAI (Scoped - one instance per request)
-builder.Services.AddScoped<IChatClient>(sp =>
+builder.Services.AddScoped(sp =>
 {
     var chatClient = new OpenAI.Chat.ChatClient(model: "gpt-4o", apiKey: openAiApiKey);
     return chatClient.AsIChatClient();
