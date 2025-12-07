@@ -1,32 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { masterAgentService, ProjectionResult, type MasterStreamResponse } from '../services/masterAgent';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ChatMessage, TelemetryData } from '../interfaces/MasterAgentChat.interface';
+import { ProjectionResult } from '../interfaces/ProjectionResult.interface';
+import { masterAgentService, type MasterStreamResponse } from '../services/masterAgent';
+import { ChatThread, getThread, ThreadMessage } from '../services/threads';
 import { ProjectionResultCard } from './Cards/Projections/ProjectionResultCard';
 import { WorkflowProgressCard, WorkflowStep } from './Cards/WorkflowProgressCard';
 import { FileUpload, UploadedFile } from './FileUpload';
 import { MessageContent } from './MessageContent';
+import ThreadList from './ThreadList';
 
-interface ChatMessage {
-  id: string;
-  type: 'user' | 'agent' | 'thinking' | 'delegation' | 'tool' | 'telemetry' | 'multimodal' | 'transcription' | 'projection' | 'workflow-progress';
-  content: string;
-  timestamp: Date;
-  subAgentName?: string;
-  toolName?: string;
-  metadata?: Record<string, any>;
-  files?: UploadedFile[]; // For displaying user's uploaded files
-  projectionResult?: ProjectionResult; // For structured projection data
-  workflowSteps?: WorkflowStep[]; // For workflow progress tracking
-}
-
-interface TelemetryData {
-  traceId?: string;
-  duration?: number;
-  delegationCount?: number;
-  subAgentsUsed?: string[];
-  toolsUsed?: string[];
-}
 
 export const MasterAgentChat: React.FC = () => {
+
+  // states
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -37,9 +23,16 @@ export const MasterAgentChat: React.FC = () => {
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [enableThinking, setEnableThinking] = useState(false);
+  // Thread state
+  const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
+  const [selectedThread, setSelectedThread] = useState<ChatThread | null>(null);
+  const [threadRefreshTrigger, setThreadRefreshTrigger] = useState(0);
+  const [showThreadList, setShowThreadList] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const conversationId = useRef(`conv-${Date.now()}`);
 
+
+  // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -57,6 +50,8 @@ export const MasterAgentChat: React.FC = () => {
     };
   }, []);
 
+
+  // Add a new message to the chat
   const addMessage = (message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
     setMessages(prev => [...prev, {
       ...message,
@@ -64,6 +59,83 @@ export const MasterAgentChat: React.FC = () => {
       timestamp: new Date()
     }]);
   };
+
+  // Convert thread messages from API to chat messages
+  const convertThreadMessagesToChatMessages = useCallback((threadMessages: ThreadMessage[]): ChatMessage[] => {
+    const result: ChatMessage[] = [];
+    
+    for (const msg of threadMessages) {
+      // Check if this message has a projection result in metadata
+      const projectionResult = msg.metadata?.projectionResult as ProjectionResult | undefined;
+      
+      // Add the main message
+      result.push({
+        id: msg.id,
+        type: msg.role.toLowerCase() === 'user' ? 'user' : 'agent',
+        content: msg.content,
+        timestamp: new Date(msg.timestamp),
+        subAgentName: msg.subAgentName,
+        metadata: msg.metadata,
+        projectionResult: projectionResult,
+      });
+      
+      // If there's a projection result, add a separate projection message to display the chart
+      if (projectionResult) {
+        result.push({
+          id: `${msg.id}-projection`,
+          type: 'projection',
+          content: '',
+          timestamp: new Date(msg.timestamp),
+          projectionResult: projectionResult,
+        });
+      }
+    }
+    
+    return result;
+  }, []);
+
+  // Handle thread selection
+  const handleSelectThread = useCallback(async (thread: ChatThread | null) => {
+    if (!thread) {
+      // Clear current thread
+      setSelectedThread(null);
+      setCurrentThreadId(null);
+      setMessages([]);
+      setTelemetry({});
+      conversationId.current = `conv-${Date.now()}`;
+      return;
+    }
+
+    try {
+      // Load thread with messages
+      const fullThread = await getThread(thread.id);
+      setSelectedThread(fullThread);
+      setCurrentThreadId(fullThread.id);
+      conversationId.current = fullThread.id;
+      
+      // Convert and display messages
+      if (fullThread.messages && fullThread.messages.length > 0) {
+        const chatMessages = convertThreadMessagesToChatMessages(fullThread.messages);
+        setMessages(chatMessages);
+      } else {
+        setMessages([]);
+      }
+      
+      setTelemetry({});
+    } catch (error) {
+      console.error('Failed to load thread:', error);
+      setConnectionError('Failed to load conversation');
+    }
+  }, [convertThreadMessagesToChatMessages]);
+
+  // Handle new chat
+  const handleNewChat = useCallback(() => {
+    setSelectedThread(null);
+    setCurrentThreadId(null);
+    setMessages([]);
+    setTelemetry({});
+    conversationId.current = `conv-${Date.now()}`;
+  }, []);
 
   const handleSend = async () => {
     if ((!input.trim() && uploadedFiles.length === 0) || isStreaming) return;
@@ -334,8 +406,23 @@ export const MasterAgentChat: React.FC = () => {
     let accumulatedContent = '';
 
     try {
-      // Use streaming for all requests (including projections with progress tracking)
-      for await (const chunk of masterAgentService.chatStream(userMessage, conversationId.current, enableThinking)) {
+      // Use thread-aware streaming for persistence
+      for await (const chunk of masterAgentService.chatStreamWithThread(
+        userMessage, 
+        currentThreadId,  // threadId first
+        conversationId.current,  // then conversationId
+        enableThinking
+      )) {
+        // Handle thread creation response
+        if (chunk.type === 'ThreadCreated' && chunk.metadata?.threadId) {
+          const newThreadId = chunk.metadata.threadId as string;
+          setCurrentThreadId(newThreadId);
+          conversationId.current = newThreadId;
+          // Trigger thread list refresh to show new thread
+          setThreadRefreshTrigger(prev => prev + 1);
+          continue;
+        }
+
         // Debug: Log Complete chunks to see if projectionResult is present
         if (chunk.isComplete) {
           console.log('📊 Complete chunk received:', {
@@ -511,13 +598,6 @@ export const MasterAgentChat: React.FC = () => {
     }
   };
 
-  const handleNewConversation = () => {
-    // Generate new conversation ID without clearing server-side
-    conversationId.current = `conv-${Date.now()}`;
-    setMessages([]);
-    setTelemetry({});
-    console.log('🆕 Started new conversation:', conversationId.current);
-  };
 
   const getMessageBubbleStyle = (type: ChatMessage['type'], toolName?: string): string => {
     if (type === 'user') {
@@ -609,17 +689,6 @@ export const MasterAgentChat: React.FC = () => {
                 <span>Show Telemetry</span>
               </label>
 
-              {/* New Conversation Button */}
-              <button
-                onClick={handleNewConversation}
-                disabled={isStreaming}
-                className="w-full flex items-center gap-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:opacity-50 p-2 rounded-lg transition-colors"
-                title="Start a new conversation"
-              >
-                <span>➕</span>
-                <span>New Chat</span>
-              </button>
-
               {/* Clear Conversation Button */}
               {messages.length > 0 && (
                 <button
@@ -648,57 +717,70 @@ export const MasterAgentChat: React.FC = () => {
           </div>
         )}
 
-        {/* Telemetry Stats */}
-        {!sidebarCollapsed && telemetry.duration && (
-          <div className="px-6 py-4 border-b border-slate-700">
-            <div className="space-y-3">
-              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Session Stats</h3>
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center justify-between bg-slate-800/30 p-2 rounded">
-                  <span className="text-slate-400">⏱️ Duration</span>
-                  <span className="font-semibold">{telemetry.duration}ms</span>
-                </div>
-                <div className="flex items-center justify-between bg-slate-800/30 p-2 rounded">
-                  <span className="text-slate-400">🔄 Delegations</span>
-                  <span className="font-semibold">{telemetry.delegationCount || 0}</span>
-                </div>
-                <div className="flex items-center justify-between bg-slate-800/30 p-2 rounded">
-                  <span className="text-slate-400">🔧 Tools</span>
-                  <span className="font-semibold">{telemetry.toolsUsed?.length || 0}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Sub-Agents Info */}
+        {/* Thread List / Sub-Agents Toggle */}
         {!sidebarCollapsed && (
-          <div className="flex-1 overflow-y-auto px-6 py-4">
-            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Available Agents</h3>
-            <div className="space-y-2">
-              {[
-                { icon: '📊', name: 'Investment Advisor', desc: 'Fund research' },
-                { icon: '💼', name: 'Portfolio Manager', desc: 'Portfolio mgmt' },
-                { icon: '🏦', name: 'Account Services', desc: 'Account ops' },
-                { icon: '⚖️', name: 'Compliance Officer', desc: 'Risk & compliance' }
-              ].map((agent) => (
-                <div key={agent.name} className="bg-slate-800/40 p-3 rounded-lg hover:bg-slate-800/60 transition-colors">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-lg">{agent.icon}</span>
-                    <span className="font-medium text-xs">{agent.name}</span>
-                  </div>
-                  <p className="text-xs text-slate-400">{agent.desc}</p>
-                </div>
-              ))}
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {/* Tab Toggle */}
+            <div className="flex border-b border-slate-700">
+              <button
+                onClick={() => setShowThreadList(true)}
+                className={`flex-1 px-4 py-2 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                  showThreadList 
+                    ? 'bg-slate-800 text-white border-b-2 border-blue-500' 
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                }`}
+              >
+                💬 Chats
+              </button>
+              <button
+                onClick={() => setShowThreadList(false)}
+                className={`flex-1 px-4 py-2 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                  !showThreadList 
+                    ? 'bg-slate-800 text-white border-b-2 border-blue-500' 
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                }`}
+              >
+                🤖 Agents
+              </button>
             </div>
 
-            <div className="mt-6 p-3 bg-teal-900/30 border border-teal-700/30 rounded-lg">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-lg">🌐</span>
-                <span className="font-semibold text-xs">Web Search</span>
+            {/* Thread List */}
+            {showThreadList ? (
+              <ThreadList
+                selectedThreadId={currentThreadId}
+                onSelectThread={handleSelectThread}
+                onNewChat={handleNewChat}
+                refreshTrigger={threadRefreshTrigger}
+              />
+            ) : (
+              <div className="flex-1 overflow-y-auto px-6 py-4">
+                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Available Agents</h3>
+                <div className="space-y-2">
+                  {[
+                    { icon: '📊', name: 'Investment Advisor', desc: 'Fund research' },
+                    { icon: '💼', name: 'Portfolio Manager', desc: 'Portfolio mgmt' },
+                    { icon: '🏦', name: 'Account Services', desc: 'Account ops' },
+                    { icon: '⚖️', name: 'Compliance Officer', desc: 'Risk & compliance' }
+                  ].map((agent) => (
+                    <div key={agent.name} className="bg-slate-800/40 p-3 rounded-lg hover:bg-slate-800/60 transition-colors">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-lg">{agent.icon}</span>
+                        <span className="font-medium text-xs">{agent.name}</span>
+                      </div>
+                      <p className="text-xs text-slate-400">{agent.desc}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-6 p-3 bg-teal-900/30 border border-teal-700/30 rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">🌐</span>
+                    <span className="font-semibold text-xs">Web Search</span>
+                  </div>
+                  <p className="text-xs text-slate-400">Real-time web information</p>
+                </div>
               </div>
-              <p className="text-xs text-slate-400">Real-time web information</p>
-            </div>
+            )}
           </div>
         )}
 
@@ -851,15 +933,17 @@ export const MasterAgentChat: React.FC = () => {
                   
                   <div className="flex items-center justify-between mt-2 text-xs opacity-60">
                     <span>{msg.timestamp.toLocaleTimeString()}</span>
-                    {msg.metadata?.contentTypes && (
+                    {msg.metadata && 
+                     'contentTypes' in msg.metadata && 
+                     Array.isArray(msg.metadata.contentTypes) ? (
                       <div className="flex gap-1">
-                        {msg.metadata.contentTypes.map((type: string) => (
+                        {(msg.metadata.contentTypes as string[]).map((type: string) => (
                           <span key={type} className="px-2 py-0.5 bg-white/20 rounded-full">
                             {type}
                           </span>
                         ))}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
                 )}

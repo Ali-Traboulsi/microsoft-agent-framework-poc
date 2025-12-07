@@ -76,6 +76,31 @@ public interface IMasterOrchestrator
         string conversationId,
         bool enableThinking = false
     );
+
+    /// <summary>
+    /// Process a user request with streaming response, including prior conversation history
+    /// </summary>
+    /// <param name="userMessage">The user's request</param>
+    /// <param name="conversationId">Unique identifier for this conversation</param>
+    /// <param name="priorMessages">Prior conversation messages to restore context</param>
+    /// <param name="enableThinking">Enable extended reasoning mode</param>
+    /// <returns>Stream of orchestrator responses</returns>
+    IAsyncEnumerable<OrchestratorResponse> ProcessRequestStreamingWithHistoryAsync(
+        string userMessage,
+        string conversationId,
+        IEnumerable<ConversationMessage> priorMessages,
+        bool enableThinking = false
+    );
+}
+
+/// <summary>
+/// Represents a message in conversation history
+/// </summary>
+public class ConversationMessage
+{
+    public required string Role { get; init; } // "user" or "assistant"
+    public required string Content { get; init; }
+    public string? SubAgentName { get; init; }
 }
 
 /// <summary>

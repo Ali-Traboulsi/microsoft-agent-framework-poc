@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ProjectionResultCardProps } from '../../../interfaces/ProjectionResult.interface';
+import { ProjectionResult, ProjectionResultCardProps } from '../../../interfaces/ProjectionResult.interface';
 import { formatCurrency, formatPercent } from '../../../utils/formatters';
 import FundAllocationChart from '../../charts/FundAllocation.chart';
 import { FundDetailsTable } from '../../charts/FundDetails.chart';
@@ -8,11 +8,57 @@ import { StrategyComparisonChart } from '../../charts/StrategyComparision.chart'
 import ScenarioCard from './ScenarioCard';
 
 
+// Helper to normalize keys from PascalCase to camelCase
+const normalizeKeys = <T extends Record<string, unknown>>(obj: T): T => {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(item => normalizeKeys(item as Record<string, unknown>)) as unknown as T;
+  }
+  const normalized: Record<string, unknown> = {};
+  for (const key in obj) {
+    const camelKey = key.charAt(0).toLowerCase() + key.slice(1);
+    const value = obj[key];
+    normalized[camelKey] = typeof value === 'object' && value !== null 
+      ? normalizeKeys(value as Record<string, unknown>) 
+      : value;
+  }
+  return normalized as T;
+};
+
 // Main Component
-export const ProjectionResultCard: React.FC<ProjectionResultCardProps> = ({ result }) => {
+export const ProjectionResultCard: React.FC<ProjectionResultCardProps> = ({ result: rawResult }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'growth' | 'funds' | 'strategy'>('overview');
 
-  const { inputSummary, scenarios, recommendedFunds, callToAction, metadata, riskWarnings } = result;
+  // Normalize the result to handle both camelCase and PascalCase from backend
+  const result = rawResult ? normalizeKeys(rawResult as unknown as Record<string, unknown>) as unknown as ProjectionResult : null;
+
+  // Guard against undefined or incomplete result data
+  if (!result || !result.inputSummary || !result.scenarios) {
+    console.warn('ProjectionResultCard: Invalid or incomplete result data', { rawResult, normalizedResult: result });
+    return (
+      <div className="bg-gray-900 rounded-2xl shadow-xl border border-gray-700 p-6 text-center">
+        <div className="text-yellow-400 text-xl mb-2">⚠️</div>
+        <div className="text-gray-400">Unable to display projection data</div>
+        <div className="text-gray-500 text-sm mt-1">The projection data may be incomplete or in an unexpected format</div>
+      </div>
+    );
+  }
+
+  const { inputSummary, scenarios, recommendedFunds = [], callToAction, metadata, riskWarnings = [] } = result;
+
+  // Additional safety checks for nested properties
+  const safeInputSummary = {
+    amount: inputSummary.amount ?? 0,
+    currency: inputSummary.currency ?? 'USD',
+    horizon: inputSummary.horizon ?? 'N/A',
+    riskProfile: inputSummary.riskProfile ?? 'N/A',
+  };
+
+  const safeExpectedScenario = scenarios.expected ?? {
+    totalReturn: 0,
+    annualizedReturn: 0,
+    projectedValue: 0,
+  };
 
   return (
     <div className="bg-gray-900 rounded-2xl shadow-xl border border-gray-700 overflow-hidden">
@@ -29,8 +75,8 @@ export const ProjectionResultCard: React.FC<ProjectionResultCardProps> = ({ resu
             </div>
           </div>
           <div className="text-right">
-            <div className="text-3xl font-bold">{formatCurrency(inputSummary.amount, inputSummary.currency)}</div>
-            <div className="text-blue-100 text-sm">{inputSummary.horizon} • {inputSummary.riskProfile}</div>
+            <div className="text-3xl font-bold">{formatCurrency(safeInputSummary.amount, safeInputSummary.currency)}</div>
+            <div className="text-blue-100 text-sm">{safeInputSummary.horizon} • {safeInputSummary.riskProfile}</div>
           </div>
         </div>
       </div>
@@ -39,13 +85,13 @@ export const ProjectionResultCard: React.FC<ProjectionResultCardProps> = ({ resu
       <div className="grid grid-cols-4 divide-x divide-gray-700 bg-gradient-to-b from-gray-800 to-gray-900">
         <div className="p-4 text-center">
           <div className="text-2xl font-bold text-emerald-400">
-            +{formatCurrency(scenarios.expected.totalReturn)}
+            +{formatCurrency(safeExpectedScenario.totalReturn)}
           </div>
           <div className="text-xs text-gray-400 mt-1">Expected Return</div>
         </div>
         <div className="p-4 text-center">
           <div className="text-2xl font-bold text-blue-400">
-            {formatPercent(scenarios.expected.annualizedReturn)}
+            {formatPercent(safeExpectedScenario.annualizedReturn)}
           </div>
           <div className="text-xs text-gray-400 mt-1">Annual Return</div>
         </div>
@@ -55,7 +101,7 @@ export const ProjectionResultCard: React.FC<ProjectionResultCardProps> = ({ resu
         </div>
         <div className="p-4 text-center">
           <div className="text-2xl font-bold text-indigo-400">
-            {formatCurrency(scenarios.expected.projectedValue)}
+            {formatCurrency(safeExpectedScenario.projectedValue)}
           </div>
           <div className="text-xs text-gray-400 mt-1">Projected Value</div>
         </div>
@@ -92,22 +138,28 @@ export const ProjectionResultCard: React.FC<ProjectionResultCardProps> = ({ resu
         {activeTab === 'overview' && (
           <div className="space-y-6">
             <div className="grid grid-cols-3 gap-4">
-              <ScenarioCard
-                scenario={scenarios.conservative}
-                colorClass="text-emerald-400"
-                icon="🛡️"
-              />
-              <ScenarioCard
-                scenario={scenarios.expected}
-                colorClass="text-blue-400"
-                icon="🎯"
-                isHighlighted
-              />
-              <ScenarioCard
-                scenario={scenarios.optimistic}
-                colorClass="text-purple-400"
-                icon="🚀"
-              />
+              {scenarios.conservative && (
+                <ScenarioCard
+                  scenario={scenarios.conservative}
+                  colorClass="text-emerald-400"
+                  icon="🛡️"
+                />
+              )}
+              {scenarios.expected && (
+                <ScenarioCard
+                  scenario={scenarios.expected}
+                  colorClass="text-blue-400"
+                  icon="🎯"
+                  isHighlighted
+                />
+              )}
+              {scenarios.optimistic && (
+                <ScenarioCard
+                  scenario={scenarios.optimistic}
+                  colorClass="text-purple-400"
+                  icon="🚀"
+                />
+              )}
             </div>
 
             {/* Mini Chart Preview */}
@@ -125,7 +177,7 @@ export const ProjectionResultCard: React.FC<ProjectionResultCardProps> = ({ resu
           <div className="space-y-6">
             <div className="bg-gray-800 rounded-xl p-6">
               <h3 className="font-semibold text-gray-200 mb-4 text-lg">
-                Investment Growth Over {inputSummary.horizon}
+                Investment Growth Over {safeInputSummary.horizon}
               </h3>
               <GrowthProjectionChart scenarios={scenarios} />
             </div>
@@ -136,11 +188,11 @@ export const ProjectionResultCard: React.FC<ProjectionResultCardProps> = ({ resu
                 { scenario: scenarios.conservative, color: 'emerald', label: 'Conservative' },
                 { scenario: scenarios.expected, color: 'blue', label: 'Expected' },
                 { scenario: scenarios.optimistic, color: 'purple', label: 'Optimistic' },
-              ].map(({ scenario, color, label }) => (
+              ].filter(item => item.scenario).map(({ scenario, color, label }) => (
                 <div key={label} className={`bg-${color}-900/30 rounded-lg p-4 border border-${color}-700/50`}>
                   <div className="text-sm font-medium text-gray-400 mb-2">{label} Return Rate</div>
                   <div className={`text-2xl font-bold text-${color}-400`}>
-                    {formatPercent(scenario.assumedReturnRate)}
+                    {formatPercent(scenario?.assumedReturnRate ?? 0)}
                   </div>
                   <div className="text-xs text-gray-500 mt-1">Annual average</div>
                 </div>

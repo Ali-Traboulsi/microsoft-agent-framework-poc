@@ -226,6 +226,90 @@ class MasterAgentService {
   }
 
   /**
+   * Stream chat with thread persistence
+   * Returns the thread ID as the first response (type: 'ThreadCreated')
+   */
+  async* chatStreamWithThread(
+    message: string,
+    threadId: string | null,
+    conversationId: string | null,
+    enableThinking: boolean = false
+  ): AsyncGenerator<MasterStreamResponse & { threadId?: string }> {
+    // Ensure we're connected before streaming
+    if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
+      console.log('🔄 Not connected, attempting to connect...');
+      await this.connect();
+    }
+
+    if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
+      throw new Error('Failed to establish connection to Master Agent hub');
+    }
+
+    const stream = this.connection.stream<MasterStreamResponse>(
+      'ChatStreamWithThread',
+      message,
+      threadId,
+      conversationId,
+      enableThinking
+    );
+
+    // Create a promise-based queue for async iteration
+    const queue: MasterStreamResponse[] = [];
+    let resolveNext: ((value: IteratorResult<MasterStreamResponse>) => void) | null = null;
+    let error: Error | null = null;
+    let completed = false;
+
+    const subscription = stream.subscribe({
+      next: (item) => {
+        if (resolveNext) {
+          resolveNext({ value: item, done: false });
+          resolveNext = null;
+        } else {
+          queue.push(item);
+        }
+      },
+      error: (err) => {
+        error = err;
+        if (resolveNext) {
+          resolveNext({ value: undefined as any, done: true });
+          resolveNext = null;
+        }
+      },
+      complete: () => {
+        completed = true;
+        if (resolveNext) {
+          resolveNext({ value: undefined as any, done: true });
+          resolveNext = null;
+        }
+      }
+    });
+
+    try {
+      while (!completed && !error) {
+        if (queue.length > 0) {
+          yield queue.shift()!;
+        } else {
+          const result = await new Promise<IteratorResult<MasterStreamResponse>>((resolve) => {
+            resolveNext = resolve;
+          });
+          
+          if (result.done) {
+            break;
+          }
+          
+          yield result.value;
+        }
+      }
+
+      if (error) {
+        throw error;
+      }
+    } finally {
+      subscription.dispose();
+    }
+  }
+
+  /**
    * Upload files with multimodal chat (non-streaming)
    */
   async chatWithFiles(

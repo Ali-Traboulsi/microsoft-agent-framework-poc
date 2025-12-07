@@ -6,10 +6,13 @@ using AgentFrameworkQuickStart.Api.SubAgents;
 using AgentFrameworkQuickStart.Api.Workflows;
 using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection;
 using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection.Executors;
+using AgentFrameworkQuickStart.Core.Interfaces;
 using AgentFrameworkQuickStart.Infrastructure.ExternalApis;
+using AgentFrameworkQuickStart.Infrastructure.Persistence;
 using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Tools;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
@@ -213,6 +216,22 @@ builder.Services.AddSwaggerGen(c =>
     );
 });
 
+// ===== Database Configuration =====
+// Configure SQLite database for chat thread persistence
+var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Data", "agentchat.db");
+var dbDirectory = Path.GetDirectoryName(dbPath);
+if (!string.IsNullOrEmpty(dbDirectory) && !Directory.Exists(dbDirectory))
+{
+    Directory.CreateDirectory(dbDirectory);
+}
+
+builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite($"Data Source={dbPath}"));
+
+// Register Unit of Work and Repositories (Scoped)
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+
+Console.WriteLine($"📦 Database configured: {dbPath}");
+
 // Register data store (Singleton - shared across all requests)
 builder.Services.AddSingleton<InvestmentDataStore>();
 
@@ -299,6 +318,23 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// ===== Database Migration =====
+// Ensure database is created and migrations are applied
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    try
+    {
+        dbContext.Database.EnsureCreated();
+        Console.WriteLine("✅ Database initialized successfully");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Database initialization failed: {ex.Message}");
+        throw;
+    }
+}
 
 // Initialize data store with seed data
 var dataStore = app.Services.GetRequiredService<InvestmentDataStore>();
