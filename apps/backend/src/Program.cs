@@ -1,6 +1,7 @@
 using AgentFrameworkQuickStart.Api;
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.Hubs;
+using AgentFrameworkQuickStart.Api.Hubs.Handlers;
 using AgentFrameworkQuickStart.Api.Orchestration;
 using AgentFrameworkQuickStart.Api.SubAgents;
 using AgentFrameworkQuickStart.Api.Workflows;
@@ -287,6 +288,11 @@ builder.Services.AddScoped<ISubAgent, ProfitProjectionSubAgent>();
 
 // Register helper classes for orchestration
 builder.Services.AddScoped<StructuredResponseHandler>();
+
+// Register SignalR Hub Handlers
+builder.Services.AddScoped<IChatHandler, ChatStreamHandler>();
+builder.Services.AddScoped<IMultiModalChatHandler, MultiModalChatHandler>();
+builder.Services.AddScoped<IThreadedChatHandler, ThreadedChatHandler>();
 
 // Register Master Orchestrator (Scoped - one instance per request)
 builder.Services.AddScoped<IMasterOrchestrator, MasterOrchestrator>();

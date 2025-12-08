@@ -160,7 +160,9 @@ Run demo scenarios: `dotnet run` (executes 9 predefined scenarios in `Program.cs
 
 ## Notes
 
-- **No database** - all data in-memory (restart clears state)
 - **OpenAI key required** - set `OPENAI_API_KEY` env var or edit Program.cs
 - **Frontend expects backend on port 5000** - both must run together
 - **Agent Framework** is Microsoft's Semantic Kernel with additional abstractions
+- **database:** migrations should be present and up to date
+- Do not create files with over 500 lines of code. Split into multiple files as needed
+- use primary constructor syntax for classes where possible
