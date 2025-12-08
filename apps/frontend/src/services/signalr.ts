@@ -16,9 +16,13 @@ class SignalRService {
 
     this.connection = new HubConnectionBuilder()
       .withUrl('/hubs/agent')
-      .withAutomaticReconnect()
+      .withAutomaticReconnect([0, 2000, 5000, 10000, 30000]) // Retry with increasing delays
       .configureLogging(LogLevel.Information)
       .build();
+
+    // Configure longer timeouts for external API calls
+    this.connection.serverTimeoutInMilliseconds = 300000; // 5 minutes
+    this.connection.keepAliveIntervalInMilliseconds = 15000; // 15 seconds
 
     try {
       await this.connection.start();

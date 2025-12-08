@@ -40,9 +40,13 @@ export async function connect(): Promise<signalR.HubConnection> {
 
   connection = new signalR.HubConnectionBuilder()
     .withUrl(HUB_URL)
-    .withAutomaticReconnect()
+    .withAutomaticReconnect([0, 2000, 5000, 10000, 30000]) // Retry with increasing delays
     .configureLogging(signalR.LogLevel.Information)
     .build();
+
+  // Configure longer timeouts for external API calls (Render.com has cold starts)
+  connection.serverTimeoutInMilliseconds = 300000; // 5 minutes
+  connection.keepAliveIntervalInMilliseconds = 15000; // 15 seconds
 
   try {
     await connection.start();

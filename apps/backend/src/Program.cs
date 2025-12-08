@@ -5,12 +5,15 @@ using AgentFrameworkQuickStart.Api.Hubs.Handlers;
 using AgentFrameworkQuickStart.Api.Orchestration;
 using AgentFrameworkQuickStart.Api.SubAgents;
 using AgentFrameworkQuickStart.Api.Workflows;
+using AgentFrameworkQuickStart.Api.Workflows.FundIn;
+using AgentFrameworkQuickStart.Api.Workflows.FundIn.Executors;
 using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection;
 using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection.Executors;
 using AgentFrameworkQuickStart.Core.Interfaces;
 using AgentFrameworkQuickStart.Infrastructure.ExternalApis;
 using AgentFrameworkQuickStart.Infrastructure.Persistence;
 using AgentFrameworkQuickStart.Services;
+using AgentFrameworkQuickStart.Services.FundIn;
 using AgentFrameworkQuickStart.Tools;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Microsoft.EntityFrameworkCore;
@@ -40,6 +43,12 @@ builder
         // Increase message size limit for multimodal content (base64-encoded files)
         // Default is 32KB, increase to 100MB to support large audio/image files
         options.MaximumReceiveMessageSize = 100 * 1024 * 1024; // 100MB
+
+        // Increase timeouts for external API calls (Render.com has cold starts)
+        options.ClientTimeoutInterval = TimeSpan.FromMinutes(5);
+        options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+        options.HandshakeTimeout = TimeSpan.FromSeconds(30);
+        options.EnableDetailedErrors = true;
     })
     .AddJsonProtocol(options =>
     {
@@ -248,13 +257,28 @@ builder.Services.AddScoped<PortfolioTools>();
 builder.Services.AddScoped<MutualFundTools>();
 builder.Services.AddScoped<WebSearchTools>();
 builder.Services.AddScoped<ProjectionTools>();
+builder.Services.AddScoped<SNBCapitalTools>();
+builder.Services.AddScoped<FundInTools>();
+builder.Services.AddScoped<FundInWorkflowTools>();
 
 // Register SNB Capital API Service (Singleton - shared HttpClient)
+// Note: Render.com has cold starts, so we need a longer timeout
 builder.Services.AddHttpClient<SNBCapitalApiService>(client =>
 {
     client.BaseAddress = new Uri("https://snbc-api.onrender.com/snbc/api/v1/");
     client.DefaultRequestHeaders.Add("Accept", "application/json");
+    client.Timeout = TimeSpan.FromSeconds(120); // 2 minutes for cold starts
 });
+
+// Register Fund-In Service
+builder.Services.AddHttpClient<FundInService>(client =>
+{
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+    client.Timeout = TimeSpan.FromSeconds(120); // 2 minutes for cold starts
+});
+
+// Register Test Token Service (for demo JWT token generation)
+builder.Services.AddSingleton<TestTokenService>();
 
 // Register SNB Capital API Adapter (Clean Architecture abstraction)
 builder.Services.AddScoped<ISNBCapitalApi, SNBCapitalApiAdapter>();
@@ -272,6 +296,16 @@ builder.Services.AddScoped<RecommendationEngine>();
 builder.Services.AddScoped<ProfitProjectionWorkflow>();
 builder.Services.AddScoped<StreamingProfitProjectionWorkflow>();
 
+// Register Fund-In Workflow Executors (Scoped)
+builder.Services.AddScoped<AccountsRetriever>();
+builder.Services.AddScoped<PreviewExecutor>();
+builder.Services.AddScoped<StartExecutor>();
+builder.Services.AddScoped<OtpVerificationExecutor>();
+builder.Services.AddScoped<CommitExecutor>();
+
+// Register Fund-In Workflow (Scoped)
+builder.Services.AddScoped<FundInWorkflow>();
+
 // Register IChatClient using OpenAI (Scoped - one instance per request)
 builder.Services.AddScoped(sp =>
 {
@@ -285,6 +319,7 @@ builder.Services.AddScoped<ISubAgent, InvestmentAdvisorSubAgent>();
 builder.Services.AddScoped<ISubAgent, AccountServicesSubAgent>();
 builder.Services.AddScoped<ISubAgent, ComplianceOfficerSubAgent>();
 builder.Services.AddScoped<ISubAgent, ProfitProjectionSubAgent>();
+builder.Services.AddScoped<ISubAgent, ExternalApiSubAgent>();
 
 // Register helper classes for orchestration
 builder.Services.AddScoped<StructuredResponseHandler>();

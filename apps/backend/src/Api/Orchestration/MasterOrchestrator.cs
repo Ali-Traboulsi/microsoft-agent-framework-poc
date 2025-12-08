@@ -84,10 +84,12 @@ public partial class MasterOrchestrator : IMasterOrchestrator
             instructions: instructions,
             tools:
             [
+                // Orchestration tools - Master agent delegates to specialized sub-agents
                 AIFunctionFactory.Create(DelegateToSubAgent),
                 AIFunctionFactory.Create(DelegateToMultipleSubAgents),
                 AIFunctionFactory.Create(GetAvailableSubAgentsAsString),
                 AIFunctionFactory.Create(_webSearchTools.SearchWeb),
+                // Note: SNB Capital and Fund-In operations are handled by ExternalApiServices sub-agent
             ]
         );
     }

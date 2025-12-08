@@ -58,4 +58,16 @@ public static class AgentInstructionsLoader
         var instructionsFile = Path.Combine(InstructionsPath, "ProjectionSubAgentInstructions.txt");
         return File.ReadAllText(instructionsFile);
     }
+
+    /// <summary>
+    /// Load external API sub-agent instructions (SNB Capital, Fund-In, etc.)
+    /// </summary>
+    public static string LoadExternalApiSubAgentInstructions()
+    {
+        var instructionsFile = Path.Combine(
+            InstructionsPath,
+            "ExternalApiSubAgentInstructions.txt"
+        );
+        return File.ReadAllText(instructionsFile);
+    }
 }

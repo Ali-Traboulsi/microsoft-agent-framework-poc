@@ -14,7 +14,7 @@ public partial class MasterOrchestrator
     [Description("Delegate a request to a specific sub-agent specialist")]
     public async Task<string> DelegateToSubAgent(
         [Description(
-            "The name of the sub-agent: PortfolioManager, InvestmentAdvisor, AccountServices, or ComplianceOfficer"
+            "The name of the sub-agent: PortfolioManager, InvestmentAdvisor, AccountServices, ComplianceOfficer, ProfitProjection, or ExternalApiServices (for SNB Capital API, mutual funds, portfolios, and fund-in operations)"
         )]
             string subAgentName,
         [Description("The specific task or question for the sub-agent")] string request,
