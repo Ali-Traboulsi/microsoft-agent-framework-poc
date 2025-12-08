@@ -78,20 +78,21 @@ docker build -t agent-frontend:latest \
   --build-arg VITE_API_URL=https://your-backend-url.com .
 ```
 
-### Push to GitHub Container Registry (GHCR)
+### Push to Docker Hub
 
 ```bash
-# 1. Login to GHCR
-echo $GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+# 1. Login to Docker Hub
+docker login -u alitraboulsi96
 
 # 2. Tag images
-docker tag agent-backend:latest ghcr.io/YOUR_GITHUB_USERNAME/agent-backend:latest
-docker tag agent-frontend:latest ghcr.io/YOUR_GITHUB_USERNAME/agent-frontend:latest
-
+docker tag agent-backend:latest alitraboulsi96/agent-backend:latest
+docker tag agent-frontend:latest alitraboulsi96/agent-frontend:latest
 # 3. Push images
-docker push ghcr.io/YOUR_GITHUB_USERNAME/agent-backend:latest
-docker push ghcr.io/YOUR_GITHUB_USERNAME/agent-frontend:latest
+docker push alitraboulsi96/agent-backend:latest
+docker push alitraboulsi96/agent-frontend:latest
 ```
+
+> **Tip:** Create a free Docker Hub account at [hub.docker.com](https://hub.docker.com) if you don't have one.
 
 ---
 

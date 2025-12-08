@@ -1,0 +1,36 @@
+# Build outputs
+**/bin/
+**/obj/
+
+# IDE and Editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+
+# Solution file (we build the .csproj directly)
+**/*.sln
+
+# Local settings
+appsettings.Development.json
+appsettings.*.local.json
+
+# Logs
+*.log
+logs/
+
+# Test results
+TestResults/
+coverage/
+
+# Temporary files
+*.tmp
+*.temp

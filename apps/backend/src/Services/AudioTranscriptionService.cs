@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using Microsoft.Extensions.Logging;
 
 namespace AgentFrameworkQuickStart.Services;
 
@@ -8,15 +9,26 @@ namespace AgentFrameworkQuickStart.Services;
 public class AudioTranscriptionService
 {
     private readonly HttpClient _httpClient;
-    private readonly string _apiKey;
+    private readonly string? _apiKey;
+    private readonly ILogger<AudioTranscriptionService> _logger;
 
-    public AudioTranscriptionService(HttpClient httpClient, IConfiguration configuration)
+    public AudioTranscriptionService(
+        HttpClient httpClient,
+        IConfiguration configuration,
+        ILogger<AudioTranscriptionService> logger
+    )
     {
         _httpClient = httpClient;
+        _logger = logger;
         _apiKey =
-            configuration["OpenAI:ApiKey"]
-            ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY")
-            ?? throw new InvalidOperationException("OpenAI API key not configured");
+            configuration["OpenAI:ApiKey"] ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+
+        if (string.IsNullOrEmpty(_apiKey))
+        {
+            _logger.LogWarning(
+                "OpenAI API key not configured - audio transcription will not be available"
+            );
+        }
     }
 
     /// <summary>
@@ -28,6 +40,11 @@ public class AudioTranscriptionService
         CancellationToken cancellationToken = default
     )
     {
+        if (string.IsNullOrEmpty(_apiKey))
+        {
+            return "Error: Audio transcription is not available - OpenAI API key not configured";
+        }
+
         try
         {
             using var content = new MultipartFormDataContent();

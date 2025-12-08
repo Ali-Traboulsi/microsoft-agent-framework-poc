@@ -22,39 +22,27 @@ namespace AgentFrameworkQuickStart.Api.Hubs;
 public class MasterAgentHub : Hub
 {
     private readonly IMasterOrchestrator _orchestrator;
-    private readonly ILogger<MasterAgentHub> _logger;
     private readonly AudioTranscriptionService _audioService;
     private readonly IServiceScopeFactory _scopeFactory;
 
     public MasterAgentHub(
         IMasterOrchestrator orchestrator,
-        ILogger<MasterAgentHub> logger,
         AudioTranscriptionService audioService,
         IServiceScopeFactory scopeFactory
     )
     {
         _orchestrator = orchestrator;
-        _logger = logger;
         _audioService = audioService;
         _scopeFactory = scopeFactory;
     }
 
     public override async Task OnConnectedAsync()
     {
-        _logger.LogInformation(
-            "Master agent client connected: {ConnectionId}",
-            Context.ConnectionId
-        );
         await base.OnConnectedAsync();
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        _logger.LogInformation(
-            "Master agent client disconnected: {ConnectionId}, Exception: {Exception}",
-            Context.ConnectionId,
-            exception?.Message
-        );
         await base.OnDisconnectedAsync(exception);
     }
 
@@ -112,13 +100,6 @@ public class MasterAgentHub : Hub
         [EnumeratorCancellation] CancellationToken cancellationToken
     )
     {
-        _logger.LogInformation(
-            "Master agent multi-modal streaming chat for {ConnectionId}, Conversation: {ConversationId}, ContentCount: {ContentCount}",
-            Context.ConnectionId,
-            request.ConversationId ?? "new",
-            request.Contents?.Count ?? 0
-        );
-
         // Validate request
         if (request.Contents == null || request.Contents.Count == 0)
         {
@@ -159,14 +140,6 @@ public class MasterAgentHub : Hub
         // Process each content item - transcribe audio, pass everything else to AI natively
         foreach (var content in request.Contents)
         {
-            _logger.LogInformation(
-                "Processing content: Type={Type}, HasData={HasData}, HasText={HasText}, MediaType={MediaType}",
-                content.Type,
-                !string.IsNullOrEmpty(content.Data),
-                !string.IsNullOrEmpty(content.Text),
-                content.MediaType
-            );
-
             if (
                 content.Type?.ToLowerInvariant() == "audio"
                 && !string.IsNullOrEmpty(content.Data)
@@ -174,8 +147,6 @@ public class MasterAgentHub : Hub
                 && AudioTranscriptionService.IsAudioFile(content.MediaType)
             )
             {
-                _logger.LogInformation("Audio content detected, starting transcription...");
-
                 // Extract base64 audio data
                 var base64Data = content.Data;
                 if (base64Data.StartsWith("data:"))
@@ -296,7 +267,6 @@ public class MasterAgentHub : Hub
             if (threadId.HasValue && threadId.Value != Guid.Empty)
             {
                 actualThreadId = threadId.Value;
-                _logger.LogInformation("Using existing thread {ThreadId}", actualThreadId);
 
                 // Load prior messages from database to restore conversation context
                 var existingThread = await unitOfWork.Threads.GetByIdWithMessagesAsync(
@@ -324,7 +294,6 @@ public class MasterAgentHub : Hub
                     cancellationToken
                 );
                 actualThreadId = thread.Id;
-                _logger.LogInformation("Created new thread {ThreadId}", actualThreadId);
             }
 
             // Save user message
@@ -343,14 +312,6 @@ public class MasterAgentHub : Hub
         var responseContent = new System.Text.StringBuilder();
         string? subAgentName = null;
         object? projectionResult = null;
-
-        _logger.LogInformation(
-            "Master agent streaming chat for {ConnectionId}, Thread: {ThreadId}, Conversation: {ConversationId}, PriorMessages: {PriorCount}",
-            Context.ConnectionId,
-            actualThreadId,
-            actualConversationId,
-            priorMessages.Count
-        );
 
         // First, send the thread ID to the client
         yield return new MasterStreamingResponse
@@ -380,10 +341,6 @@ public class MasterAgentHub : Hub
         {
             if (cancellationToken.IsCancellationRequested)
             {
-                _logger.LogInformation(
-                    "Master agent streaming cancelled for {ConnectionId}",
-                    Context.ConnectionId
-                );
                 break;
             }
 
@@ -444,10 +401,6 @@ public class MasterAgentHub : Hub
                 };
 
                 await unitOfWork.Messages.AddAsync(assistantMessage, cancellationToken);
-                _logger.LogInformation(
-                    "Saved assistant response to thread {ThreadId}",
-                    actualThreadId
-                );
             }
         }
     }

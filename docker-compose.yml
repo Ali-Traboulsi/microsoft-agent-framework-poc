@@ -19,8 +19,8 @@ services:
       # - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
       # - AZURE_OPENAI_DEPLOYMENT=${AZURE_OPENAI_DEPLOYMENT}
     volumes:
-      # Persist SQLite database
-      - backend-data:/app/data
+      # Persist SQLite database (capital D to match app code)
+      - backend-data:/app/Data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
@@ -42,7 +42,9 @@ services:
     ports:
       - "80:80"
     environment:
-      - BACKEND_URL=http://backend:5000
+      # For Docker Compose: use internal Docker service name
+      # For Railway/external: set to your backend URL (e.g., https://your-backend.railway.app)
+      - BACKEND_URL=${BACKEND_URL:-http://backend:5000}
     depends_on:
       backend:
         condition: service_healthy

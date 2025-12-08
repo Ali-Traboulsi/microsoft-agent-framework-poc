@@ -2,10 +2,11 @@ version: '3.8'
 
 # Production Docker Compose Override
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Set DOCKERHUB_USERNAME environment variable before running
 
 services:
   backend:
-    image: ${DOCKER_REGISTRY:-ghcr.io}/${GITHUB_USERNAME}/agent-backend:${TAG:-latest}
+    image: ${DOCKERHUB_USERNAME}/agent-backend:${TAG:-latest}
     deploy:
       resources:
         limits:
@@ -25,7 +26,7 @@ services:
         max-file: "3"
 
   frontend:
-    image: ${DOCKER_REGISTRY:-ghcr.io}/${GITHUB_USERNAME}/agent-frontend:${TAG:-latest}
+    image: ${DOCKERHUB_USERNAME}/agent-frontend:${TAG:-latest}
     deploy:
       resources:
         limits:
