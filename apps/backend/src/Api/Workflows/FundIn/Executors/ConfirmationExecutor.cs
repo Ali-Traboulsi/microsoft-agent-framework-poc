@@ -103,6 +103,7 @@ public class ConfirmationExecutor(
             var data = response.Data!;
 
             // Check if the response indicates ready to commit
+            // IsReadyToCommit is a computed property based on Status == "ReadyToCommit"
             if (!data.IsReadyToCommit)
             {
                 ConfirmationFailedCounter.Add(1);
@@ -116,7 +117,7 @@ public class ConfirmationExecutor(
                 return new ConfirmationResult
                 {
                     Success = false,
-                    TransactionId = data.TransactionId,
+                    TransactionId = transactionId, // Use input transactionId, not from response
                     Status = data.Status ?? "Pending",
                     IsReadyToCommit = false,
                     ErrorMessage =
@@ -131,7 +132,7 @@ public class ConfirmationExecutor(
 
             logger.LogInformation(
                 "Transaction confirmed: TransactionId={TransactionId}, Status={Status}, ReadyToCommit={Ready}",
-                data.TransactionId,
+                transactionId,
                 data.Status,
                 data.IsReadyToCommit
             );
@@ -139,7 +140,7 @@ public class ConfirmationExecutor(
             return new ConfirmationResult
             {
                 Success = true,
-                TransactionId = data.TransactionId,
+                TransactionId = transactionId, // Use input transactionId, not from response
                 Status = data.Status ?? "ReadyToCommit",
                 IsReadyToCommit = true,
                 ConfirmedAt = DateTime.UtcNow,

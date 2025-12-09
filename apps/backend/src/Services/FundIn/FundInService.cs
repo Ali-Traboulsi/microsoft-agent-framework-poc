@@ -168,10 +168,9 @@ public class FundInService(
         try
         {
             logger.LogInformation(
-                "Previewing fund-in for CIF: {CIF}, Amount: {Amount} {Currency}",
+                "Previewing fund-in for CIF: {CIF}, Amount: {Amount}",
                 cif,
-                request.Amount,
-                request.Currency
+                request.Amount
             );
 
             var httpRequest = new HttpRequestMessage(
@@ -187,8 +186,8 @@ public class FundInService(
             var response = await httpClient.SendAsync(httpRequest);
             var content = await response.Content.ReadAsStringAsync();
 
-            // Log raw response for debugging
-            logger.LogDebug(
+            // Log raw response for debugging - use Information level to always see it
+            logger.LogInformation(
                 "Fund-In Preview API Response - Status: {StatusCode}, Content: {Content}",
                 response.StatusCode,
                 content
@@ -201,9 +200,15 @@ public class FundInService(
 
             // Build detailed error message
             string? errorMessage = null;
-            if (!(apiResponse?.IsSuccess ?? false))
+            if (!(apiResponse?.IsSuccess ?? false) || apiResponse?.Data == null)
             {
                 errorMessage = apiResponse?.Message ?? "Unknown error";
+                if (string.IsNullOrEmpty(errorMessage) || errorMessage == "Unknown error")
+                {
+                    // Try to extract error from raw response
+                    errorMessage =
+                        $"API returned no success. Raw: {content.Substring(0, Math.Min(500, content.Length))}";
+                }
                 if (!response.IsSuccessStatusCode)
                 {
                     errorMessage =
@@ -214,14 +219,24 @@ public class FundInService(
                     errorMessage,
                     content
                 );
+
+                return new FundInPreviewResponse
+                {
+                    Success = false,
+                    Message = errorMessage,
+                    Data = apiResponse?.Data,
+                    ErrorCode = !response.IsSuccessStatusCode
+                        ? response.StatusCode.ToString()
+                        : "API_ERROR",
+                };
             }
 
             return new FundInPreviewResponse
             {
-                Success = apiResponse?.IsSuccess ?? false,
-                Message = errorMessage ?? apiResponse?.Message,
+                Success = true,
+                Message = apiResponse?.Message,
                 Data = apiResponse?.Data,
-                ErrorCode = !response.IsSuccessStatusCode ? response.StatusCode.ToString() : null,
+                ErrorCode = null,
             };
         }
         catch (Exception ex)
@@ -272,7 +287,8 @@ public class FundInService(
             var response = await httpClient.SendAsync(httpRequest);
             var content = await response.Content.ReadAsStringAsync();
 
-            logger.LogDebug(
+            // Log with Information level to see the response
+            logger.LogInformation(
                 "Confirm Start API Response - Status: {StatusCode}, Content: {Content}",
                 response.StatusCode,
                 content
@@ -283,22 +299,12 @@ public class FundInService(
                 JsonOptions
             );
 
-            var isReadyToCommit =
-                apiResponse?.Data?.Status == "ReadyToCommit"
-                || apiResponse?.Data?.IsReadyToCommit == true
-                || (apiResponse?.IsSuccess == true);
-
+            // IsReadyToCommit is now a computed property based on Status
             return new FundInConfirmStartResponse
             {
                 Success = apiResponse?.IsSuccess ?? false,
                 Message = apiResponse?.Message,
-                Data =
-                    apiResponse?.Data != null
-                        ? apiResponse.Data with
-                        {
-                            IsReadyToCommit = isReadyToCommit,
-                        }
-                        : null,
+                Data = apiResponse?.Data,
                 ErrorCode = !response.IsSuccessStatusCode ? response.StatusCode.ToString() : null,
             };
         }

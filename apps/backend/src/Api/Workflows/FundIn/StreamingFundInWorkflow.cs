@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.Workflows.FundIn.Executors;
 using AgentFrameworkQuickStart.Api.Workflows.FundIn.Messages;
+using AgentFrameworkQuickStart.Services;
 
 namespace AgentFrameworkQuickStart.Api.Workflows.FundIn;
 
@@ -86,6 +87,7 @@ public class StreamingFundInWorkflow(
     PreviewExecutor previewExecutor,
     ConfirmationExecutor confirmationExecutor,
     CommitExecutor commitExecutor,
+    WorkflowProgressNotifier progressNotifier,
     ILogger<StreamingFundInWorkflow> logger
 )
 {
@@ -101,18 +103,27 @@ public class StreamingFundInWorkflow(
     public ChannelReader<WorkflowProgressEvent> ExecuteAsync(
         FundInWorkflowRequest request,
         string? accessToken,
+        string conversationId,
         Action<FundInWorkflowResult> onComplete,
         Action<Exception>? onError = null
     )
     {
         var channel = Channel.CreateUnbounded<WorkflowProgressEvent>();
-        _ = ExecuteInternalAsync(request, accessToken, channel.Writer, onComplete, onError);
+        _ = ExecuteInternalAsync(
+            request,
+            accessToken,
+            conversationId,
+            channel.Writer,
+            onComplete,
+            onError
+        );
         return channel.Reader;
     }
 
     private async Task ExecuteInternalAsync(
         FundInWorkflowRequest request,
         string? accessToken,
+        string conversationId,
         ChannelWriter<WorkflowProgressEvent> writer,
         Action<FundInWorkflowResult> onComplete,
         Action<Exception>? onError
@@ -128,25 +139,55 @@ public class StreamingFundInWorkflow(
         activity?.SetTag("currency", request.Currency);
         activity?.SetTag("cif", request.Cif);
 
+        // Helper to emit progress via SignalR AND channel
+        async Task EmitProgress(
+            int stepIndex,
+            bool isCompleted,
+            long? durationMs = null,
+            string? details = null
+        )
+        {
+            var progressEvent = FundInWorkflowStepDefinitions.CreateProgressEvent(
+                stepIndex,
+                isCompleted,
+                durationMs,
+                details
+            );
+
+            // Write to channel for internal tracking
+            await writer.WriteAsync(progressEvent);
+
+            // Push directly to SignalR for real-time updates
+            await progressNotifier.NotifyProgressAsync(
+                conversationId,
+                progressEvent.StepId,
+                progressEvent.StepName,
+                progressEvent.StepNameAr,
+                progressEvent.StepNumber,
+                progressEvent.TotalSteps,
+                progressEvent.IsCompleted,
+                progressEvent.DurationMs,
+                progressEvent.Details
+            );
+        }
+
         try
         {
             // Step 0: Initialization
             stepStopwatch.Restart();
-            await writer.WriteAsync(FundInWorkflowStepDefinitions.CreateProgressEvent(0, false));
+            await EmitProgress(0, false);
             await Task.Delay(50); // Brief pause for UI to render
             stepStopwatch.Stop();
-            await writer.WriteAsync(
-                FundInWorkflowStepDefinitions.CreateProgressEvent(
-                    0,
-                    true,
-                    stepStopwatch.ElapsedMilliseconds,
-                    $"Transaction {transactionId[..8]} initialized"
-                )
+            await EmitProgress(
+                0,
+                true,
+                stepStopwatch.ElapsedMilliseconds,
+                $"Transaction {transactionId[..8]} initialized"
             );
 
             // Step 1: Accounts Retrieval & Preview
             stepStopwatch.Restart();
-            await writer.WriteAsync(FundInWorkflowStepDefinitions.CreateProgressEvent(1, false));
+            await EmitProgress(1, false);
 
             var accountsContext = await accountsRetriever.ExecuteAsync(request, accessToken);
 
@@ -181,18 +222,16 @@ public class StreamingFundInWorkflow(
             transactionId = previewResult.TransactionId;
 
             stepStopwatch.Stop();
-            await writer.WriteAsync(
-                FundInWorkflowStepDefinitions.CreateProgressEvent(
-                    1,
-                    true,
-                    stepStopwatch.ElapsedMilliseconds,
-                    $"Accounts verified. Fees: {previewResult.Fees:N2} {request.Currency}, Est. Units: {previewResult.EstimatedUnits:N4}"
-                )
+            await EmitProgress(
+                1,
+                true,
+                stepStopwatch.ElapsedMilliseconds,
+                $"Accounts verified. Fees: {previewResult.Fees:N2} {request.Currency}, Est. Units: {previewResult.EstimatedUnits:N4}"
             );
 
             // Step 2: Confirmation (with step-up token)
             stepStopwatch.Restart();
-            await writer.WriteAsync(FundInWorkflowStepDefinitions.CreateProgressEvent(2, false));
+            await EmitProgress(2, false);
 
             // Generate step-up token for confirmation
             var stepUpToken = confirmationExecutor.GenerateStepUpToken();
@@ -211,18 +250,16 @@ public class StreamingFundInWorkflow(
             }
 
             stepStopwatch.Stop();
-            await writer.WriteAsync(
-                FundInWorkflowStepDefinitions.CreateProgressEvent(
-                    2,
-                    true,
-                    stepStopwatch.ElapsedMilliseconds,
-                    $"Transaction {transactionId[..8]} confirmed, status: {confirmationResult.Status}"
-                )
+            await EmitProgress(
+                2,
+                true,
+                stepStopwatch.ElapsedMilliseconds,
+                $"Transaction {transactionId[..8]} confirmed, status: {confirmationResult.Status}"
             );
 
             // Step 3: Commit (with step-up token and idempotency key)
             stepStopwatch.Restart();
-            await writer.WriteAsync(FundInWorkflowStepDefinitions.CreateProgressEvent(3, false));
+            await EmitProgress(3, false);
 
             // Use same step-up token for commit
             var commitResult = await commitExecutor.ExecuteAsync(
@@ -239,13 +276,11 @@ public class StreamingFundInWorkflow(
             stepStopwatch.Stop();
             var completedAt = DateTime.UtcNow;
 
-            await writer.WriteAsync(
-                FundInWorkflowStepDefinitions.CreateProgressEvent(
-                    3,
-                    true,
-                    stepStopwatch.ElapsedMilliseconds,
-                    $"Transaction committed: {commitResult.ReferenceNumber}"
-                )
+            await EmitProgress(
+                3,
+                true,
+                stepStopwatch.ElapsedMilliseconds,
+                $"Transaction committed: {commitResult.ReferenceNumber}"
             );
 
             // Create successful result

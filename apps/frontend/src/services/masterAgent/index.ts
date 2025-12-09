@@ -29,8 +29,12 @@ export {
     ensureConnected,
     getConnection,
     getConnectionState,
-    isConnected
+    isConnected,
+    onWorkflowProgress
 } from './connection';
+
+// Re-export types from connection
+export type { WorkflowProgressEvent } from './connection';
 
 // Re-export streaming methods
 export {

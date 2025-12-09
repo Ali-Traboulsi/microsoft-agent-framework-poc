@@ -2,8 +2,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Text;
-using System.Text.Json;
-using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.Middleware;
 using AgentFrameworkQuickStart.Api.Workflows.FundIn;
 using AgentFrameworkQuickStart.Api.Workflows.FundIn.Messages;
@@ -13,7 +11,7 @@ namespace AgentFrameworkQuickStart.Tools;
 /// <summary>
 /// Tools for invoking the Fund-In Workflow with real-time progress streaming
 /// Provides a high-level interface for the complete fund transfer process
-/// Emits progress events to SignalR via DelegationEventMiddleware
+/// Events are pushed directly via SignalR for real-time updates
 ///
 /// Simplified flow (no OTP):
 /// 1. Initialization
@@ -38,12 +36,6 @@ public class FundInWorkflowTools(
         "invocations",
         "Number of Fund-In tool invocations"
     );
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
 
     // Store last result for retrieval
     private FundInWorkflowResult? _lastResult;
@@ -104,6 +96,7 @@ public class FundInWorkflowTools(
             var channelReader = streamingWorkflow.ExecuteAsync(
                 request,
                 null, // accessToken - step-up token is generated internally
+                conversationId, // Pass conversation ID for SignalR progress updates
                 onComplete: r =>
                 {
                     result = r;
@@ -112,20 +105,11 @@ public class FundInWorkflowTools(
                 onError: ex => error = ex
             );
 
-            // Stream progress events and emit to middleware for SignalR
-            await foreach (var progressEvent in channelReader.ReadAllAsync())
+            // Wait for channel to complete (progress is now pushed via SignalR in real-time)
+            await foreach (var _ in channelReader.ReadAllAsync())
             {
-                DelegationEventMiddleware.EmitWorkflowProgressEvent(
-                    conversationId,
-                    progressEvent.StepId,
-                    progressEvent.StepName,
-                    progressEvent.StepNameAr,
-                    progressEvent.StepNumber,
-                    progressEvent.TotalSteps,
-                    progressEvent.IsCompleted,
-                    progressEvent.DurationMs,
-                    progressEvent.Details
-                );
+                // Events are now pushed directly via SignalR in the workflow
+                // This just awaits completion
             }
 
             if (error != null)

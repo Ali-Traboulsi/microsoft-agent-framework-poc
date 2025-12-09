@@ -80,8 +80,6 @@ public class PreviewExecutor(FundInService fundInService, ILogger<PreviewExecuto
                 SourceAccountId = request.SourceAccountId,
                 TargetPortfolioNumber = request.TargetPortfolioNumber,
                 Amount = request.Amount,
-                Currency = request.Currency,
-                FundId = request.FundId,
             };
 
             var response = await fundInService.PreviewFundInAsync(
@@ -117,10 +115,11 @@ public class PreviewExecutor(FundInService fundInService, ILogger<PreviewExecuto
             activity?.SetTag("total_amount", data.TotalAmount);
 
             logger.LogInformation(
-                "Preview successful: TransactionId={TransactionId}, Fees={Fees}, Total={Total}",
+                "Preview successful: TransactionId={TransactionId}, Fees={Fees}, Total={Total}, Portfolio={Portfolio}",
                 data.TransactionId,
                 data.Fees,
-                data.TotalAmount
+                data.TotalAmount,
+                data.TargetPortfolioName
             );
 
             return new PreviewResult
@@ -129,12 +128,12 @@ public class PreviewExecutor(FundInService fundInService, ILogger<PreviewExecuto
                 TransactionId = data.TransactionId,
                 Amount = data.Amount,
                 Currency = data.Currency ?? request.Currency,
-                Fees = data.Fees ?? 0,
-                TotalAmount = data.TotalAmount ?? data.Amount,
-                FundName = data.FundName,
-                EstimatedUnits = data.EstimatedUnits,
-                CurrentNav = data.CurrentNav,
-                ExpiresAt = data.ExpiresAt,
+                Fees = data.Fees,
+                TotalAmount = data.TotalAmount,
+                FundName = data.TargetPortfolioName, // Use portfolio name as fund name
+                EstimatedUnits = null, // Not provided by API
+                CurrentNav = null, // Not provided by API
+                ExpiresAt = null, // Not provided by API
             };
         }
         catch (Exception ex)

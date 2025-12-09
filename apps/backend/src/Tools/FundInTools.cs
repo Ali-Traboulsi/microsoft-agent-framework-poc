@@ -126,8 +126,6 @@ public class FundInTools(
                 SourceAccountId = sourceAccountId,
                 TargetPortfolioNumber = targetPortfolioNumber,
                 Amount = amount,
-                Currency = currency,
-                FundId = fundId,
             };
 
             var response = await fundInService.PreviewFundInAsync(cif, request, accessToken);
@@ -147,10 +145,6 @@ public class FundInTools(
                         response.Data?.Currency,
                         response.Data?.Fees,
                         response.Data?.TotalAmount,
-                        response.Data?.FundName,
-                        response.Data?.EstimatedUnits,
-                        response.Data?.CurrentNav,
-                        response.Data?.ExpiresAt,
                     },
                     NextStep = "Use ConfirmFundIn with transactionId to proceed",
                 },
@@ -197,7 +191,7 @@ public class FundInTools(
                     response.Message,
                     Confirmation = new
                     {
-                        response.Data?.TransactionId,
+                        response.Data?.Otp,
                         response.Data?.Status,
                         response.Data?.IsReadyToCommit,
                     },

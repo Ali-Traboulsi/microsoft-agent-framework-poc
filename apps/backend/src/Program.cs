@@ -74,112 +74,112 @@ var enableAzureMonitor = !string.IsNullOrEmpty(
 var enableConsoleExporter = builder.Configuration.GetValue("OpenTelemetry:ConsoleExporter", true);
 var enableRuntimeMetrics = builder.Configuration.GetValue("OpenTelemetry:RuntimeMetrics", false); // Disabled by default - too verbose
 
-builder
-    .Services.AddOpenTelemetry()
-    .ConfigureResource(resource =>
-        resource
-            .AddService(
-                serviceName: serviceName,
-                serviceVersion: serviceVersion,
-                serviceInstanceId: Environment.MachineName
-            )
-            .AddAttributes(
-                new Dictionary<string, object>
-                {
-                    ["deployment.environment"] =
-                        builder.Environment.EnvironmentName ?? "Development",
-                    ["service.namespace"] = "AgentFramework",
-                }
-            )
-    )
-    .WithTracing(tracing =>
-    {
-        tracing
-            // Built-in Microsoft Agent Framework tracing
-            .AddSource("Microsoft.Agents.AI")
-            .AddSource("Microsoft.Extensions.AI")
-            // Custom tracing for our orchestration
-            .AddSource("InvestmentBanking.MasterOrchestrator")
-            .AddSource("InvestmentBanking.SubAgents")
-            .AddSource("InvestmentBanking.Workflows")
-            // Profit Projection Workflow tracing
-            .AddSource("InvestmentBanking.ProfitProjection.Workflow")
-            .AddSource("InvestmentBanking.ProfitProjection.CustomerContext")
-            .AddSource("InvestmentBanking.ProfitProjection.HistoricalAnalyzer")
-            .AddSource("InvestmentBanking.ProfitProjection.MarketConditions")
-            .AddSource("InvestmentBanking.ProfitProjection.FundSelection")
-            .AddSource("InvestmentBanking.ProfitProjection.Aggregator")
-            .AddSource("InvestmentBanking.ProfitProjection.ScenarioBuilder")
-            .AddSource("InvestmentBanking.ProfitProjection.Recommendations")
-            // ASP.NET Core automatic instrumentation
-            .AddAspNetCoreInstrumentation(options =>
-            {
-                options.RecordException = true;
-                options.EnrichWithHttpRequest = (activity, httpRequest) =>
-                {
-                    activity.SetTag("http.request_id", httpRequest.HttpContext.TraceIdentifier);
-                };
-                options.EnrichWithHttpResponse = (activity, httpResponse) =>
-                {
-                    activity.SetTag("http.response.status_code", httpResponse.StatusCode);
-                };
-            })
-            // HTTP client instrumentation for outbound calls
-            .AddHttpClientInstrumentation(options =>
-            {
-                options.RecordException = true;
-                options.EnrichWithHttpRequestMessage = (activity, httpRequest) =>
-                {
-                    activity.SetTag("http.request.method", httpRequest.Method.ToString());
-                    activity.SetTag("http.request.uri", httpRequest.RequestUri?.ToString());
-                };
-            })
-            // Console exporter for development
-            .AddConsoleExporter(options =>
-            {
-                options.Targets = OpenTelemetry.Exporter.ConsoleExporterOutputTargets.Console;
-            });
+// builder
+//     .Services.AddOpenTelemetry()
+//     .ConfigureResource(resource =>
+//         resource
+//             .AddService(
+//                 serviceName: serviceName,
+//                 serviceVersion: serviceVersion,
+//                 serviceInstanceId: Environment.MachineName
+//             )
+//             .AddAttributes(
+//                 new Dictionary<string, object>
+//                 {
+//                     ["deployment.environment"] =
+//                         builder.Environment.EnvironmentName ?? "Development",
+//                     ["service.namespace"] = "AgentFramework",
+//                 }
+//             )
+//     )
+//     .WithTracing(tracing =>
+//     {
+//         tracing
+//             // Built-in Microsoft Agent Framework tracing
+//             .AddSource("Microsoft.Agents.AI")
+//             .AddSource("Microsoft.Extensions.AI")
+//             // Custom tracing for our orchestration
+//             .AddSource("InvestmentBanking.MasterOrchestrator")
+//             .AddSource("InvestmentBanking.SubAgents")
+//             .AddSource("InvestmentBanking.Workflows")
+//             // Profit Projection Workflow tracing
+//             .AddSource("InvestmentBanking.ProfitProjection.Workflow")
+//             .AddSource("InvestmentBanking.ProfitProjection.CustomerContext")
+//             .AddSource("InvestmentBanking.ProfitProjection.HistoricalAnalyzer")
+//             .AddSource("InvestmentBanking.ProfitProjection.MarketConditions")
+//             .AddSource("InvestmentBanking.ProfitProjection.FundSelection")
+//             .AddSource("InvestmentBanking.ProfitProjection.Aggregator")
+//             .AddSource("InvestmentBanking.ProfitProjection.ScenarioBuilder")
+//             .AddSource("InvestmentBanking.ProfitProjection.Recommendations")
+//             // ASP.NET Core automatic instrumentation
+//             .AddAspNetCoreInstrumentation(options =>
+//             {
+//                 options.RecordException = true;
+//                 options.EnrichWithHttpRequest = (activity, httpRequest) =>
+//                 {
+//                     activity.SetTag("http.request_id", httpRequest.HttpContext.TraceIdentifier);
+//                 };
+//                 options.EnrichWithHttpResponse = (activity, httpResponse) =>
+//                 {
+//                     activity.SetTag("http.response.status_code", httpResponse.StatusCode);
+//                 };
+//             })
+//             // HTTP client instrumentation for outbound calls
+//             .AddHttpClientInstrumentation(options =>
+//             {
+//                 options.RecordException = true;
+//                 options.EnrichWithHttpRequestMessage = (activity, httpRequest) =>
+//                 {
+//                     activity.SetTag("http.request.method", httpRequest.Method.ToString());
+//                     activity.SetTag("http.request.uri", httpRequest.RequestUri?.ToString());
+//                 };
+//             })
+//             // Console exporter for development
+//             .AddConsoleExporter(options =>
+//             {
+//                 options.Targets = OpenTelemetry.Exporter.ConsoleExporterOutputTargets.Console;
+//             });
 
-        // Azure Monitor uses Azure SDK, not OTLP
-    })
-    .WithMetrics(metrics =>
-    {
-        metrics
-            // Built-in Microsoft Agent Framework metrics
-            .AddMeter("Microsoft.Agents.AI")
-            .AddMeter("Microsoft.Extensions.AI")
-            // Custom metrics for our orchestration
-            .AddMeter("InvestmentBanking.MasterOrchestrator")
-            .AddMeter("InvestmentBanking.SubAgents")
-            .AddMeter("InvestmentBanking.Workflows")
-            // Profit Projection Workflow metrics
-            .AddMeter("InvestmentBanking.ProfitProjection.Workflow")
-            .AddMeter("InvestmentBanking.ProfitProjection.CustomerContext")
-            .AddMeter("InvestmentBanking.ProfitProjection.HistoricalAnalyzer")
-            .AddMeter("InvestmentBanking.ProfitProjection.MarketConditions")
-            .AddMeter("InvestmentBanking.ProfitProjection.FundSelection")
-            .AddMeter("InvestmentBanking.ProfitProjection.Aggregator")
-            .AddMeter("InvestmentBanking.ProfitProjection.ScenarioBuilder")
-            .AddMeter("InvestmentBanking.ProfitProjection.Recommendations")
-            // ASP.NET Core runtime metrics
-            .AddAspNetCoreInstrumentation()
-            // HTTP client metrics
-            .AddHttpClientInstrumentation();
+//         // Azure Monitor uses Azure SDK, not OTLP
+//     })
+//     .WithMetrics(metrics =>
+//     {
+//         metrics
+//             // Built-in Microsoft Agent Framework metrics
+//             .AddMeter("Microsoft.Agents.AI")
+//             .AddMeter("Microsoft.Extensions.AI")
+//             // Custom metrics for our orchestration
+//             .AddMeter("InvestmentBanking.MasterOrchestrator")
+//             .AddMeter("InvestmentBanking.SubAgents")
+//             .AddMeter("InvestmentBanking.Workflows")
+//             // Profit Projection Workflow metrics
+//             .AddMeter("InvestmentBanking.ProfitProjection.Workflow")
+//             .AddMeter("InvestmentBanking.ProfitProjection.CustomerContext")
+//             .AddMeter("InvestmentBanking.ProfitProjection.HistoricalAnalyzer")
+//             .AddMeter("InvestmentBanking.ProfitProjection.MarketConditions")
+//             .AddMeter("InvestmentBanking.ProfitProjection.FundSelection")
+//             .AddMeter("InvestmentBanking.ProfitProjection.Aggregator")
+//             .AddMeter("InvestmentBanking.ProfitProjection.ScenarioBuilder")
+//             .AddMeter("InvestmentBanking.ProfitProjection.Recommendations")
+//             // ASP.NET Core runtime metrics
+//             .AddAspNetCoreInstrumentation()
+//             // HTTP client metrics
+//             .AddHttpClientInstrumentation();
 
-        // .NET Runtime metrics (verbose - enable only if needed)
-        if (enableRuntimeMetrics)
-        {
-            metrics.AddRuntimeInstrumentation();
-        }
+//         // .NET Runtime metrics (verbose - enable only if needed)
+//         if (enableRuntimeMetrics)
+//         {
+//             metrics.AddRuntimeInstrumentation();
+//         }
 
-        // Console exporter for development
-        if (enableConsoleExporter)
-        {
-            metrics.AddConsoleExporter();
-        }
+//         // Console exporter for development
+//         if (enableConsoleExporter)
+//         {
+//             metrics.AddConsoleExporter();
+//         }
 
-        // Azure Monitor uses Azure SDK, not OTLP
-    });
+//         // Azure Monitor uses Azure SDK, not OTLP
+//     });
 
 // Add Azure Monitor if connection string is configured
 if (enableAzureMonitor)
@@ -301,6 +301,9 @@ builder.Services.AddScoped<AccountsRetriever>();
 builder.Services.AddScoped<PreviewExecutor>();
 builder.Services.AddScoped<ConfirmationExecutor>();
 builder.Services.AddScoped<CommitExecutor>();
+
+// Register Workflow Progress Notifier (for real-time SignalR updates)
+builder.Services.AddScoped<WorkflowProgressNotifier>();
 
 // Register Fund-In Workflow (Scoped)
 builder.Services.AddScoped<StreamingFundInWorkflow>();

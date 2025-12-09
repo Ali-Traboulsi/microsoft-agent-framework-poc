@@ -1,25 +1,33 @@
+using System.Text.Json.Serialization;
+
 namespace AgentFrameworkQuickStart.Services.FundIn;
 
 #region Fund-In Request DTOs
 
 /// <summary>
 /// Request to preview a fund-in transaction
+/// API expects: fromAccountId, toPortfolioId, amount, currency, fundId
 /// </summary>
 public record FundInPreviewRequest
 {
+    [JsonPropertyName("fromAccountId")]
     public required string SourceAccountId { get; init; }
+
+    [JsonPropertyName("toPortfolioId")]
     public required string TargetPortfolioNumber { get; init; }
+
+    [JsonPropertyName("amount")]
     public required decimal Amount { get; init; }
-    public string Currency { get; init; } = "SAR";
-    public string? FundId { get; init; }
 }
 
 /// <summary>
 /// Request to confirm/start a fund-in transaction (after preview)
 /// Requires transactionId from preview response
+/// API expects: { "fundInTxnId": "..." }
 /// </summary>
 public record FundInConfirmStartRequest
 {
+    [JsonPropertyName("fundInTxnId")]
     public required string TransactionId { get; init; }
 }
 
@@ -43,10 +51,14 @@ public record FundInResendOtpRequest
 /// <summary>
 /// Request to commit/finalize a fund-in transaction
 /// Requires transactionId and idempotency key
+/// API expects: { "fundInTxnId": "...", "idempotencyKey": "..." }
 /// </summary>
 public record FundInCommitRequest
 {
+    [JsonPropertyName("fundInTxnId")]
     public required string TransactionId { get; init; }
+
+    [JsonPropertyName("idempotencyKey")]
     public required string IdempotencyKey { get; init; }
 }
 
@@ -65,24 +77,86 @@ public record FundInPreviewResponse
     public string? ErrorCode { get; init; }
 }
 
+/// <summary>
+/// Preview data matching actual API response structure
+/// API returns: txnId, sessionId, summary (nested), fx, warnings
+/// </summary>
 public record FundInPreviewData
 {
+    [JsonPropertyName("txnId")]
     public string? TransactionId { get; init; }
-    public decimal Amount { get; init; }
+
+    [JsonPropertyName("sessionId")]
+    public string? SessionId { get; init; }
+
+    [JsonPropertyName("summary")]
+    public FundInPreviewSummary? Summary { get; init; }
+
+    [JsonPropertyName("warnings")]
+    public List<string>? Warnings { get; init; }
+
+    // Computed properties for backward compatibility
+    public decimal Amount => Summary?.Amount?.Value ?? 0;
+    public string? Currency => Summary?.Amount?.Currency;
+    public decimal Fees => Summary?.Fee?.Value ?? 0;
+    public decimal Vat => Summary?.Vat?.Value ?? 0;
+    public decimal TotalAmount => Summary?.TotalDebit?.Value ?? 0;
+    public string? TargetPortfolioNumber => Summary?.ToPortfolio?.Id;
+    public string? TargetPortfolioName => Summary?.ToPortfolio?.Name;
+    public string? SourceAccountMasked => Summary?.FromAccountMasked;
+}
+
+public record FundInPreviewSummary
+{
+    [JsonPropertyName("fromAccountMasked")]
+    public string? FromAccountMasked { get; init; }
+
+    [JsonPropertyName("toPortfolio")]
+    public FundInPortfolioInfo? ToPortfolio { get; init; }
+
+    [JsonPropertyName("amount")]
+    public MoneyValue? Amount { get; init; }
+
+    [JsonPropertyName("fee")]
+    public MoneyValue? Fee { get; init; }
+
+    [JsonPropertyName("vat")]
+    public MoneyValue? Vat { get; init; }
+
+    [JsonPropertyName("totalDebit")]
+    public MoneyValue? TotalDebit { get; init; }
+
+    [JsonPropertyName("rate")]
+    public decimal? Rate { get; init; }
+
+    [JsonPropertyName("amountAccountCcy")]
+    public MoneyValue? AmountAccountCcy { get; init; }
+
+    [JsonPropertyName("amountPortfolioCcy")]
+    public MoneyValue? AmountPortfolioCcy { get; init; }
+}
+
+public record FundInPortfolioInfo
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; init; }
+}
+
+public record MoneyValue
+{
+    [JsonPropertyName("value")]
+    public decimal Value { get; init; }
+
+    [JsonPropertyName("currency")]
     public string? Currency { get; init; }
-    public decimal? Fees { get; init; }
-    public decimal? TotalAmount { get; init; }
-    public string? SourceAccountId { get; init; }
-    public string? TargetPortfolioNumber { get; init; }
-    public string? FundId { get; init; }
-    public string? FundName { get; init; }
-    public decimal? EstimatedUnits { get; init; }
-    public decimal? CurrentNav { get; init; }
-    public DateTime? ExpiresAt { get; init; }
 }
 
 /// <summary>
 /// Response after confirming/starting fund-in (ReadyToCommit)
+/// API returns: { "data": { "status": "ReadyToCommit", "otp": null } }
 /// </summary>
 public record FundInConfirmStartResponse
 {
@@ -94,10 +168,14 @@ public record FundInConfirmStartResponse
 
 public record FundInConfirmStartData
 {
-    public string? TransactionId { get; init; }
+    [JsonPropertyName("status")]
     public string? Status { get; init; }
-    public bool IsReadyToCommit { get; init; }
-    public string? Message { get; init; }
+
+    [JsonPropertyName("otp")]
+    public string? Otp { get; init; }
+
+    // Computed property - ready to commit if status is "ReadyToCommit"
+    public bool IsReadyToCommit => Status == "ReadyToCommit";
 }
 
 /// <summary>

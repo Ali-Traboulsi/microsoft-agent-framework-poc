@@ -50,9 +50,10 @@ public class AccountsRetriever(
         {
             logger.LogInformation("Fetching accounts and portfolios for CIF: {Cif}", request.Cif);
 
-            // Fetch accounts and portfolios in parallel
+            // Fetch accounts from FundInService and portfolios from SNBCapitalApiService in parallel
+            // Using SNBCapitalApiService for portfolios because it uses the correct endpoint
             var accountsTask = fundInService.GetCustomerAccountsAsync(request.Cif, accessToken);
-            var portfoliosTask = fundInService.GetCustomerAccountPortfoliosAsync(
+            var portfoliosTask = snbCapitalApiService.GetCustomerPortfoliosAsync(
                 request.Cif,
                 accessToken
             );
@@ -64,10 +65,10 @@ public class AccountsRetriever(
 
             // Log raw API response for debugging
             logger.LogDebug(
-                "Portfolios API response - Success: {Success}, Message: {Message}, DataCount: {Count}",
+                "Portfolios API response - Success: {Success}, Message: {Message}, PortfolioCount: {Count}",
                 portfoliosResponse.Success,
                 portfoliosResponse.Message,
-                portfoliosResponse.Data?.Count ?? 0
+                portfoliosResponse.Portfolios?.Count ?? 0
             );
 
             // Map accounts
@@ -83,10 +84,10 @@ public class AccountsRetriever(
                     })
                     .ToList() ?? [];
 
-            // Map portfolios
+            // Map portfolios from SNBCapitalApiService response
             var portfolios =
                 portfoliosResponse
-                    .Data?.Select(p => new PortfolioInfo
+                    .Portfolios?.Select(p => new PortfolioInfo
                     {
                         PortfolioNumber = p.PortfolioNumber ?? "",
                         PortfolioName = p.PortfolioName,

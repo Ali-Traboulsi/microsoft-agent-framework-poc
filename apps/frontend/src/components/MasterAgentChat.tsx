@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ProjectionResult } from '../interfaces/ProjectionResult.interface';
-import { chatStreamMultiModal, chatStreamWithThread, clearConversation, connect, disconnect, type MasterStreamResponse } from '../services/masterAgent';
+import { chatStreamMultiModal, chatStreamWithThread, clearConversation, connect, disconnect, onWorkflowProgress, type MasterStreamResponse, type WorkflowProgressEvent } from '../services/masterAgent';
 import { ChatMessage, TelemetryData } from '../services/masterAgent/types';
 import { ChatThread, getThread, ThreadMessage } from '../services/threads';
 import { ProjectionResultCard } from './Cards/Projections/ProjectionResultCard';
@@ -18,7 +18,6 @@ export const MasterAgentChat: React.FC = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [_telemetry, setTelemetry] = useState<TelemetryData>({});
-  const [showTelemetry, setShowTelemetry] = useState(true);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -37,18 +36,118 @@ export const MasterAgentChat: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Track connection state for registering event handlers
+  const [isConnected, setIsConnected] = useState(false);
+
   useEffect(() => {
     connect()
-      .then(() => setConnectionError(null))
+      .then(() => {
+        setConnectionError(null);
+        setIsConnected(true);
+      })
       .catch((error) => {
         console.error('SignalR connection error:', error);
         setConnectionError(error.message || 'Failed to connect to Master Agent');
+        setIsConnected(false);
       });
 
     return () => {
       disconnect().catch(console.error);
+      setIsConnected(false);
     };
   }, []);
+
+  // Track workflow progress message ID for updates (moved up for use in useEffect)
+  const workflowProgressMessageIdRef = useRef<string | null>(null);
+
+  // Handle workflow progress events - defined early for use in SignalR event handler
+  const handleWorkflowProgress = useCallback((chunk: MasterStreamResponse) => {
+    console.log('🎯 handleWorkflowProgress called with:', chunk);
+    if (!chunk.stepId || chunk.stepNumber === null || chunk.totalSteps === null) {
+      console.log('⚠️ Skipping chunk - missing required fields');
+      return;
+    }
+
+    const newStep: WorkflowStep = {
+      stepId: chunk.stepId,
+      stepName: chunk.stepName || chunk.stepId,
+      stepNameAr: chunk.stepNameAr || chunk.stepName || chunk.stepId,
+      stepNumber: chunk.stepNumber,
+      totalSteps: chunk.totalSteps,
+      isCompleted: chunk.type === 'StepComplete',
+      durationMs: chunk.stepDurationMs ?? undefined,
+      details: chunk.stepDetails ?? undefined,
+    };
+
+    if (!workflowProgressMessageIdRef.current) {
+      // Create new workflow progress message
+      const newId = `msg-workflow-${Date.now()}`;
+      workflowProgressMessageIdRef.current = newId;
+      setMessages(prev => [...prev, {
+        id: newId,
+        type: 'workflow-progress',
+        content: 'Processing...',
+        timestamp: new Date(),
+        workflowSteps: [newStep],
+      }]);
+    } else {
+      // Update existing workflow progress message
+      setMessages(prev => prev.map(msg => {
+        if (msg.id !== workflowProgressMessageIdRef.current) return msg;
+        
+        const existingSteps = msg.workflowSteps || [];
+        const stepIndex = existingSteps.findIndex(s => s.stepId === newStep.stepId);
+        
+        let updatedSteps: WorkflowStep[];
+        if (stepIndex >= 0) {
+          // Update existing step
+          updatedSteps = [...existingSteps];
+          updatedSteps[stepIndex] = newStep;
+        } else {
+          // Add new step
+          updatedSteps = [...existingSteps, newStep];
+        }
+        
+        return { ...msg, workflowSteps: updatedSteps };
+      }));
+    }
+  }, []);
+
+  // Register for real-time workflow progress events AFTER connection is established
+  useEffect(() => {
+    if (!isConnected) {
+      return; // Wait for connection
+    }
+
+    console.log('🔗 Registering workflow progress handler after connection established');
+    // Register handler for real-time workflow progress events
+    const unsubscribe = onWorkflowProgress((event: WorkflowProgressEvent) => {
+      console.log('📊 Workflow progress event received:', event);
+      // Convert the event to MasterStreamResponse format and handle it
+      const chunk: MasterStreamResponse = {
+        type: event.stepCompleted ? 'StepComplete' : 'StepStart',
+        content: event.content ?? null,
+        stepId: event.stepId,
+        stepName: event.stepName ?? null,
+        stepNameAr: event.stepNameAr ?? null,
+        stepNumber: event.stepNumber,
+        totalSteps: event.totalSteps,
+        stepCompleted: event.stepCompleted,
+        stepDurationMs: event.stepDurationMs ?? null,
+        stepDetails: event.stepDetails ?? null,
+        isComplete: false,
+        subAgentName: null,
+        toolName: null,
+        metadata: null,
+        projectionResult: null,
+      };
+      handleWorkflowProgress(chunk);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [isConnected, handleWorkflowProgress]);
 
 
   // Add a new message to the chat
@@ -234,18 +333,6 @@ export const MasterAgentChat: React.FC = () => {
             traceId
           });
 
-          if (showTelemetry) {
-            addMessage({
-              type: 'telemetry',
-              content: JSON.stringify({
-                duration,
-                delegations: delegationsUsed.length,
-                subAgents: [...new Set(delegationsUsed)],
-                tools: toolsUsed.length,
-                traceId: traceId?.substring(0, 8)
-              }, null, 2)
-            });
-          }
           break;
         }
 
@@ -341,58 +428,6 @@ export const MasterAgentChat: React.FC = () => {
     }
   };
 
-  // Track workflow progress message ID for updates
-  const workflowProgressMessageIdRef = useRef<string | null>(null);
-
-  // Handle workflow progress events
-  const handleWorkflowProgress = (chunk: MasterStreamResponse) => {
-    if (!chunk.stepId || chunk.stepNumber === null || chunk.totalSteps === null) return;
-
-    const newStep: WorkflowStep = {
-      stepId: chunk.stepId,
-      stepName: chunk.stepName || chunk.stepId,
-      stepNameAr: chunk.stepNameAr || chunk.stepName || chunk.stepId,
-      stepNumber: chunk.stepNumber,
-      totalSteps: chunk.totalSteps,
-      isCompleted: chunk.type === 'StepComplete',
-      durationMs: chunk.stepDurationMs ?? undefined,
-      details: chunk.stepDetails ?? undefined,
-    };
-
-    if (!workflowProgressMessageIdRef.current) {
-      // Create new workflow progress message
-      const newId = `msg-workflow-${Date.now()}`;
-      workflowProgressMessageIdRef.current = newId;
-      setMessages(prev => [...prev, {
-        id: newId,
-        type: 'workflow-progress',
-        content: 'Processing...',
-        timestamp: new Date(),
-        workflowSteps: [newStep],
-      }]);
-    } else {
-      // Update existing workflow progress message
-      setMessages(prev => prev.map(msg => {
-        if (msg.id !== workflowProgressMessageIdRef.current) return msg;
-        
-        const existingSteps = msg.workflowSteps || [];
-        const stepIndex = existingSteps.findIndex(s => s.stepId === newStep.stepId);
-        
-        let updatedSteps: WorkflowStep[];
-        if (stepIndex >= 0) {
-          // Update existing step
-          updatedSteps = [...existingSteps];
-          updatedSteps[stepIndex] = newStep;
-        } else {
-          // Add new step
-          updatedSteps = [...existingSteps, newStep];
-        }
-        
-        return { ...msg, workflowSteps: updatedSteps };
-      }));
-    }
-  };
-
   const handleStreamingChat = async (userMessage: string) => {
     // Reset telemetry and workflow progress
     workflowProgressMessageIdRef.current = null;
@@ -457,19 +492,6 @@ export const MasterAgentChat: React.FC = () => {
           }
           
           // Add telemetry message
-          if (showTelemetry) {
-            addMessage({
-              type: 'telemetry',
-              content: JSON.stringify({
-                duration,
-                delegations: delegationsUsed.length,
-                subAgents: [...new Set(delegationsUsed)],
-                tools: toolsUsed.length,
-                traceId: traceId?.substring(0, 8),
-                hasProjection: !!chunk.projectionResult
-              }, null, 2)
-            });
-          }
           break;
         }
 
@@ -681,16 +703,6 @@ export const MasterAgentChat: React.FC = () => {
           
           {!sidebarCollapsed && (
             <div className="space-y-2">
-              <label className="flex items-center gap-2 text-sm cursor-pointer bg-slate-800/50 p-2 rounded-lg hover:bg-slate-700/50 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={showTelemetry}
-                  onChange={(e) => setShowTelemetry(e.target.checked)}
-                  className="rounded"
-                />
-                <span>Show Telemetry</span>
-              </label>
-
               {/* Clear Conversation Button */}
               {messages.length > 0 && (
                 <button

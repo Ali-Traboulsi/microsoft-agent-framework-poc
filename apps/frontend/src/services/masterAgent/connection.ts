@@ -79,3 +79,52 @@ export async function ensureConnected(): Promise<signalR.HubConnection> {
   }
   return connection;
 }
+
+/**
+ * Workflow progress event callback type
+ */
+export interface WorkflowProgressEvent {
+  type: string;
+  content?: string | null;
+  stepId: string;
+  stepName?: string | null;
+  stepNameAr?: string | null;
+  stepNumber: number;
+  totalSteps: number;
+  stepCompleted: boolean;
+  stepDurationMs?: number | null;
+  stepDetails?: string | null;
+}
+
+/**
+ * Register a handler for real-time workflow progress events.
+ * These events are pushed directly from the backend during tool execution,
+ * bypassing the streaming loop for real-time updates.
+ * 
+ * @param handler The callback to invoke when a workflow progress event is received
+ * @returns A cleanup function to unregister the handler
+ */
+export function onWorkflowProgress(
+  handler: (event: WorkflowProgressEvent) => void
+): () => void {
+  if (!connection) {
+    console.warn('Cannot register workflow progress handler: not connected');
+    return () => {};
+  }
+
+  const eventHandler = (eventConversationId: string, event: WorkflowProgressEvent) => {
+    // Accept all workflow progress events - the frontend has only one active conversation
+    console.log('📊 Received workflow progress event:', event.stepId, event.stepCompleted, 'conversationId:', eventConversationId);
+    handler(event);
+  };
+
+  connection.on('ReceiveWorkflowProgress', eventHandler);
+  console.log('✅ Registered workflow progress handler');
+
+  return () => {
+    if (connection) {
+      connection.off('ReceiveWorkflowProgress', eventHandler);
+      console.log('🔌 Unregistered workflow progress handler');
+    }
+  };
+}
