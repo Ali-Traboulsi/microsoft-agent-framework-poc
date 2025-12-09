@@ -58,16 +58,28 @@ public class CommitExecutor(
         string stepUpToken
     )
     {
+        // Generate idempotency key for this commit
+        var idempotencyKey = Guid.NewGuid().ToString();
+
         using var activity = ActivitySource.StartActivity("FundInCommit");
         activity?.SetTag("cif", cif);
         activity?.SetTag("transaction_id", transactionId);
+        activity?.SetTag("idempotency_key", idempotencyKey);
         activity?.SetTag("has_step_up_token", !string.IsNullOrEmpty(stepUpToken));
 
         try
         {
-            logger.LogInformation("Committing Fund-In transaction: {TransactionId}", transactionId);
+            logger.LogInformation(
+                "Committing Fund-In transaction: {TransactionId}, IdempotencyKey: {IdempotencyKey}",
+                transactionId,
+                idempotencyKey
+            );
 
-            var commitRequest = new FundInCommitRequest { TransactionId = transactionId };
+            var commitRequest = new FundInCommitRequest
+            {
+                TransactionId = transactionId,
+                IdempotencyKey = idempotencyKey,
+            };
 
             var response = await fundInService.CommitFundInAsync(cif, commitRequest, stepUpToken);
 
@@ -93,32 +105,31 @@ public class CommitExecutor(
             var data = response.Data!;
 
             CommitsSuccessCounter.Add(1);
-            if (data.Amount.HasValue)
-            {
-                CommitAmountHistogram.Record((double)data.Amount.Value);
-            }
+            CommitAmountHistogram.Record((double)data.DebitAmount);
 
-            activity?.SetTag("reference_number", data.ReferenceNumber);
-            activity?.SetTag("amount", data.Amount);
-            activity?.SetTag("units", data.Units);
+            activity?.SetTag("reference_number", data.PaymentReferenceId);
+            activity?.SetTag("amount", data.DebitAmount);
+            activity?.SetTag("debit_currency", data.DebitCurrency);
 
             logger.LogInformation(
-                "Transaction committed: Reference={Reference}, Amount={Amount}, Units={Units}",
-                data.ReferenceNumber,
-                data.Amount,
-                data.Units
+                "Transaction committed: Reference={Reference}, Amount={Amount} {Currency}",
+                data.PaymentReferenceId,
+                data.DebitAmount,
+                data.DebitCurrency
             );
 
             return new CommitResult
             {
                 Success = true,
                 TransactionId = data.TransactionId,
-                ReferenceNumber = data.ReferenceNumber,
+                ReferenceNumber = data.PaymentReferenceId,
                 Status = data.Status ?? "Completed",
-                Amount = data.Amount ?? 0,
-                Currency = data.Currency ?? "SAR",
-                Units = data.Units,
-                NavAtPurchase = data.NavAtPurchase,
+                Amount = data.DebitAmount,
+                Currency = data.DebitCurrency ?? "SAR",
+                // Units and NavAtPurchase are not provided in commit response
+                // These would come from a separate holdings API call
+                Units = null,
+                NavAtPurchase = null,
                 CompletedAt = data.CompletedAt ?? DateTime.UtcNow,
             };
         }

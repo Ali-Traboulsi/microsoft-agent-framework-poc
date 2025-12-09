@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
+import { FundInWorkflowCard, parseFundInWorkflowContent } from './Cards/FundInWorkflowCard';
 
 interface MessageContentProps {
   content: string;
@@ -148,6 +149,18 @@ export const MessageContent: React.FC<MessageContentProps> = ({ content, isAgent
   if (!isAgent) {
     // User messages are plain text
     return <div className="whitespace-pre-wrap">{content}</div>;
+  }
+
+  // Try to detect Fund-In workflow content first
+  const fundInContent = parseFundInWorkflowContent(content);
+  if (fundInContent && fundInContent.steps.length > 0) {
+    return (
+      <FundInWorkflowCard
+        steps={fundInContent.steps}
+        result={fundInContent.result}
+        isAwaitingOtp={fundInContent.isAwaitingOtp}
+      />
+    );
   }
 
   // Try to detect structured content

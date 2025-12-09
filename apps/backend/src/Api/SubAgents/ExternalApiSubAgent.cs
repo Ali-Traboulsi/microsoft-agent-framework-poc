@@ -37,10 +37,9 @@ public class ExternalApiSubAgent(
             "Search and filter mutual funds by criteria",
             "Get detailed mutual fund information including NAV, returns, and fees",
             "Retrieve local market stock holdings",
-            // Fund-In Workflow (use workflow tools, not low-level operations)
-            "Execute complete Fund-In workflow with automatic step coordination",
-            "Start Fund-In workflow and await OTP",
-            "Complete Fund-In workflow after OTP verification",
+            // Fund-In Workflow (single-step, no OTP, uses step-up tokens)
+            "Execute complete Fund-In workflow automatically (no OTP needed)",
+            "Transfer money from bank account to investment portfolio",
             "Get customer bank accounts for fund transfers",
             "Get portfolios available for fund-in operations",
             // Arabic Support
@@ -72,10 +71,9 @@ public class ExternalApiSubAgent(
                 // Fund-In - Account Discovery (needed before workflow)
                 AIFunctionFactory.Create(fundInTools.GetCustomerAccounts),
                 AIFunctionFactory.Create(fundInTools.GetAccountPortfolios),
-                // Fund-In Workflow (high-level orchestration - use these instead of low-level tools)
-                AIFunctionFactory.Create(fundInWorkflowTools.StartFundInWorkflow),
-                AIFunctionFactory.Create(fundInWorkflowTools.CompleteFundInWorkflow),
-                AIFunctionFactory.Create(fundInWorkflowTools.GetPendingWorkflows),
+                // Fund-In Workflow (high-level orchestration)
+                // Single execute method - no OTP needed, uses step-up token
+                AIFunctionFactory.Create(fundInWorkflowTools.ExecuteFundInWorkflow),
             ]
         );
     }

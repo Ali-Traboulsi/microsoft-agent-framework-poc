@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using AgentFrameworkQuickStart.Api.Workflows.FundIn.Messages;
+using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Services.FundIn;
 
 namespace AgentFrameworkQuickStart.Api.Workflows.FundIn.Executors;
@@ -8,8 +9,13 @@ namespace AgentFrameworkQuickStart.Api.Workflows.FundIn.Executors;
 /// <summary>
 /// Retrieves customer accounts and portfolios for Fund-In
 /// Step 1: Account Context Retrieval
+/// Uses FundInService for accounts and SNBCapitalApiService for portfolios
 /// </summary>
-public class AccountsRetriever(FundInService fundInService, ILogger<AccountsRetriever> logger)
+public class AccountsRetriever(
+    FundInService fundInService,
+    SNBCapitalApiService snbCapitalApiService,
+    ILogger<AccountsRetriever> logger
+)
 {
     private static readonly ActivitySource ActivitySource = new(
         "InvestmentBanking.FundIn.AccountsRetriever",
@@ -56,6 +62,14 @@ public class AccountsRetriever(FundInService fundInService, ILogger<AccountsRetr
             var accountsResponse = await accountsTask;
             var portfoliosResponse = await portfoliosTask;
 
+            // Log raw API response for debugging
+            logger.LogDebug(
+                "Portfolios API response - Success: {Success}, Message: {Message}, DataCount: {Count}",
+                portfoliosResponse.Success,
+                portfoliosResponse.Message,
+                portfoliosResponse.Data?.Count ?? 0
+            );
+
             // Map accounts
             var accounts =
                 accountsResponse
@@ -82,24 +96,95 @@ public class AccountsRetriever(FundInService fundInService, ILogger<AccountsRetr
                     })
                     .ToList() ?? [];
 
-            // Find selected account
+            // Find selected account - try exact match first, then partial match
             var selectedAccount = accounts.FirstOrDefault(a =>
                 a.AccountId == request.SourceAccountId
             );
 
+            // If not found, try partial/contains match for flexibility
+            selectedAccount ??= accounts.FirstOrDefault(a =>
+                a.AccountId.Contains(request.SourceAccountId)
+                || request.SourceAccountId.Contains(a.AccountId)
+            );
+
+            // Log available accounts for debugging if not found
+            if (selectedAccount == null)
+            {
+                var availableAccounts = string.Join(
+                    ", ",
+                    accounts.Select(a => $"{a.AccountId} ({a.Balance:N2} {a.Currency})")
+                );
+                logger.LogWarning(
+                    "Account {RequestedAccount} not found. Available accounts: {AvailableAccounts}",
+                    request.SourceAccountId,
+                    availableAccounts
+                );
+            }
+
+            // Also validate portfolio exists - try exact match first
+            var selectedPortfolio = portfolios.FirstOrDefault(p =>
+                p.PortfolioNumber == request.TargetPortfolioNumber
+            );
+
+            // If not found, try partial/contains match for flexibility
+            selectedPortfolio ??= portfolios.FirstOrDefault(p =>
+                !string.IsNullOrEmpty(p.PortfolioNumber)
+                && (
+                    p.PortfolioNumber.Contains(request.TargetPortfolioNumber)
+                    || request.TargetPortfolioNumber.Contains(p.PortfolioNumber)
+                )
+            );
+
+            // If still not found, try trimmed comparison (remove leading/trailing whitespace)
+            selectedPortfolio ??= portfolios.FirstOrDefault(p =>
+                !string.IsNullOrEmpty(p.PortfolioNumber)
+                && p.PortfolioNumber.Trim() == request.TargetPortfolioNumber.Trim()
+            );
+
+            if (selectedPortfolio == null)
+            {
+                var availablePortfolios = string.Join(
+                    ", ",
+                    portfolios.Select(p => $"'{p.PortfolioNumber}'")
+                );
+                logger.LogWarning(
+                    "Portfolio '{RequestedPortfolio}' not found. Available portfolios: [{AvailablePortfolios}]",
+                    request.TargetPortfolioNumber,
+                    availablePortfolios
+                );
+
+                // Log portfolio details for debugging
+                foreach (var p in portfolios)
+                {
+                    logger.LogDebug(
+                        "Portfolio: Number='{Number}', Name='{Name}', Type='{Type}', Status='{Status}'",
+                        p.PortfolioNumber,
+                        p.PortfolioName,
+                        p.PortfolioType,
+                        p.Status
+                    );
+                }
+            }
+
             var hasSufficientFunds = selectedAccount?.Balance >= request.Amount;
+            var accountFound = selectedAccount != null;
+            var portfolioFound = selectedPortfolio != null;
 
             activity?.SetTag("accounts_found", accounts.Count);
             activity?.SetTag("portfolios_found", portfolios.Count);
+            activity?.SetTag("account_found", accountFound);
+            activity?.SetTag("portfolio_found", portfolioFound);
             activity?.SetTag("has_sufficient_funds", hasSufficientFunds);
 
             AccountsRetrievedCounter.Add(1);
 
             logger.LogInformation(
                 "Found {AccountCount} accounts and {PortfolioCount} portfolios. "
-                    + "Sufficient funds: {HasFunds}",
+                    + "Account found: {AccountFound}, Portfolio found: {PortfolioFound}, Sufficient funds: {HasFunds}",
                 accounts.Count,
                 portfolios.Count,
+                accountFound,
+                portfolioFound,
                 hasSufficientFunds
             );
 
@@ -107,10 +192,13 @@ public class AccountsRetriever(FundInService fundInService, ILogger<AccountsRetr
             {
                 Accounts = accounts,
                 Portfolios = portfolios,
-                SelectedAccountId = request.SourceAccountId,
-                SelectedPortfolioNumber = request.TargetPortfolioNumber,
+                SelectedAccountId = selectedAccount?.AccountId ?? request.SourceAccountId,
+                SelectedPortfolioNumber =
+                    selectedPortfolio?.PortfolioNumber ?? request.TargetPortfolioNumber,
                 SelectedAccountBalance = selectedAccount?.Balance ?? 0,
-                HasSufficientFunds = hasSufficientFunds,
+                HasSufficientFunds = accountFound && portfolioFound && hasSufficientFunds,
+                AccountFound = accountFound,
+                PortfolioFound = portfolioFound,
             };
         }
         catch (Exception ex)

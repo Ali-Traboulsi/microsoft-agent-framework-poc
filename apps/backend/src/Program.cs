@@ -299,12 +299,11 @@ builder.Services.AddScoped<StreamingProfitProjectionWorkflow>();
 // Register Fund-In Workflow Executors (Scoped)
 builder.Services.AddScoped<AccountsRetriever>();
 builder.Services.AddScoped<PreviewExecutor>();
-builder.Services.AddScoped<StartExecutor>();
-builder.Services.AddScoped<OtpVerificationExecutor>();
+builder.Services.AddScoped<ConfirmationExecutor>();
 builder.Services.AddScoped<CommitExecutor>();
 
 // Register Fund-In Workflow (Scoped)
-builder.Services.AddScoped<FundInWorkflow>();
+builder.Services.AddScoped<StreamingFundInWorkflow>();
 
 // Register IChatClient using OpenAI (Scoped - one instance per request)
 builder.Services.AddScoped(sp =>

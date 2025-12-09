@@ -1,124 +1,88 @@
 using System.ComponentModel;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
+using System.Text;
 using System.Text.Json;
+using AgentFrameworkQuickStart.Api.Abstractions;
+using AgentFrameworkQuickStart.Api.Middleware;
 using AgentFrameworkQuickStart.Api.Workflows.FundIn;
 using AgentFrameworkQuickStart.Api.Workflows.FundIn.Messages;
 
 namespace AgentFrameworkQuickStart.Tools;
 
 /// <summary>
-/// Tools for invoking the Fund-In Workflow
+/// Tools for invoking the Fund-In Workflow with real-time progress streaming
 /// Provides a high-level interface for the complete fund transfer process
+/// Emits progress events to SignalR via DelegationEventMiddleware
+///
+/// Simplified flow (no OTP):
+/// 1. Initialization
+/// 2. Accounts & Preview (get transactionId)
+/// 3. Confirmation (step-up token → ReadyToCommit)
+/// 4. Commit (idempotency key → success)
 /// </summary>
-public class FundInWorkflowTools(FundInWorkflow fundInWorkflow, ILogger<FundInWorkflowTools> logger)
+public class FundInWorkflowTools(
+    StreamingFundInWorkflow streamingWorkflow,
+    ILogger<FundInWorkflowTools> logger
+)
 {
+    private static readonly ActivitySource ActivitySource = new(
+        "InvestmentBanking.FundIn.Tools",
+        "1.0.0"
+    );
+
+    private static readonly Meter Meter = new("InvestmentBanking.FundIn.Tools", "1.0.0");
+
+    private static readonly Counter<int> ToolInvocationsCounter = Meter.CreateCounter<int>(
+        "fundin_tool_invocations",
+        "invocations",
+        "Number of Fund-In tool invocations"
+    );
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    // Cache for workflow states awaiting OTP
-    private static readonly Dictionary<string, FundInWorkflowState> PendingWorkflows = new();
+    // Store last result for retrieval
+    private FundInWorkflowResult? _lastResult;
 
     [Description(
-        "Execute the complete Fund-In workflow to transfer money from a bank account to an investment portfolio. "
-            + "This is a multi-step process: Preview → Start → OTP Verification → Commit. "
-            + "Use this when you have all required information including the OTP code."
+        """
+            Execute the complete Fund-In workflow with real-time progress updates to transfer money 
+            from a bank account to an investment portfolio. This is a 4-step process:
+            1. Initialization - validate request
+            2. Accounts & Preview - retrieve accounts, calculate fees, get transaction ID
+            3. Confirmation - authorize with step-up token
+            4. Commit - finalize transaction
+
+            Shows step-by-step progress in the UI. Authorization is handled automatically 
+            using step-up tokens (no OTP required).
+            """
     )]
     public async Task<string> ExecuteFundInWorkflow(
         [Description("Customer CIF number (default: 100000000005)")] string cif,
         [Description("Source bank account ID")] string sourceAccountId,
         [Description("Target portfolio number")] string targetPortfolioNumber,
         [Description("Amount to transfer")] decimal amount,
-        [Description("OTP code for verification")] string otp,
         [Description("Currency (default: SAR)")] string currency = "SAR",
         [Description("Fund ID for specific mutual fund (optional)")] string? fundId = null,
         [Description("Transaction notes (optional)")] string? notes = null
     )
     {
+        using var activity = ActivitySource.StartActivity("ExecuteFundInWorkflow");
+        ToolInvocationsCounter.Add(1);
+
+        // Get conversation ID from middleware context for progress streaming
+        var conversationId =
+            DelegationEventMiddleware.CurrentConversationId ?? Guid.NewGuid().ToString();
+
         try
         {
             logger.LogInformation(
-                "Executing Fund-In workflow: {Amount} {Currency} from {Account} to {Portfolio}",
-                amount,
-                currency,
-                sourceAccountId,
-                targetPortfolioNumber
-            );
-
-            var request = new FundInWorkflowRequest
-            {
-                Cif = cif,
-                SourceAccountId = sourceAccountId,
-                TargetPortfolioNumber = targetPortfolioNumber,
-                Amount = amount,
-                Currency = currency,
-                FundId = fundId,
-                Notes = notes,
-            };
-
-            var result = await fundInWorkflow.ExecuteAsync(request, otp);
-
-            return JsonSerializer.Serialize(
-                new
-                {
-                    result.Success,
-                    result.WorkflowId,
-                    Status = result.Status.ToString(),
-                    result.TransactionId,
-                    result.ReferenceNumber,
-                    result.Amount,
-                    result.Currency,
-                    result.Fees,
-                    result.TotalAmount,
-                    result.Units,
-                    result.NavAtPurchase,
-                    result.SourceAccountId,
-                    result.TargetPortfolioNumber,
-                    result.FundName,
-                    DurationMs = result.Duration.TotalMilliseconds,
-                    result.SummaryEn,
-                    result.SummaryAr,
-                    Error = result.Success
-                        ? null
-                        : new
-                        {
-                            result.ErrorMessage,
-                            result.ErrorCode,
-                            FailedStep = result.FailedAtStep?.ToString(),
-                        },
-                },
-                JsonOptions
-            );
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Fund-In workflow execution failed");
-            return JsonSerializer.Serialize(
-                new { Success = false, ErrorMessage = ex.Message },
-                JsonOptions
-            );
-        }
-    }
-
-    [Description(
-        "Start a Fund-In workflow and trigger OTP. Use this as the first step when the customer "
-            + "wants to transfer money. Returns a workflow ID to continue after OTP is received."
-    )]
-    public async Task<string> StartFundInWorkflow(
-        [Description("Customer CIF number (default: 100000000005)")] string cif,
-        [Description("Source bank account ID")] string sourceAccountId,
-        [Description("Target portfolio number")] string targetPortfolioNumber,
-        [Description("Amount to transfer")] decimal amount,
-        [Description("Currency (default: SAR)")] string currency = "SAR",
-        [Description("Fund ID for specific mutual fund (optional)")] string? fundId = null,
-        [Description("Transaction notes (optional)")] string? notes = null
-    )
-    {
-        try
-        {
-            logger.LogInformation(
-                "Starting Fund-In workflow: {Amount} {Currency}",
+                "Executing streaming Fund-In workflow for conversation {ConversationId}: {Amount} {Currency}",
+                conversationId,
                 amount,
                 currency
             );
@@ -134,170 +98,117 @@ public class FundInWorkflowTools(FundInWorkflow fundInWorkflow, ILogger<FundInWo
                 Notes = notes,
             };
 
-            var state = await fundInWorkflow.ExecuteUpToOtpAsync(request);
+            FundInWorkflowResult? result = null;
+            Exception? error = null;
 
-            // Cache the state for completion
-            if (state.Status == FundInWorkflowStatus.AwaitingOtp)
-            {
-                PendingWorkflows[state.WorkflowId] = state;
-            }
-
-            return JsonSerializer.Serialize(
-                new
+            var channelReader = streamingWorkflow.ExecuteAsync(
+                request,
+                null, // accessToken - step-up token is generated internally
+                onComplete: r =>
                 {
-                    state.WorkflowId,
-                    Status = state.Status.ToString(),
-                    Success = state.Status == FundInWorkflowStatus.AwaitingOtp,
-                    Preview = state.Preview != null
-                        ? new
-                        {
-                            state.Preview.Amount,
-                            state.Preview.Currency,
-                            state.Preview.Fees,
-                            state.Preview.TotalAmount,
-                            state.Preview.FundName,
-                            state.Preview.EstimatedUnits,
-                            state.Preview.CurrentNav,
-                        }
-                        : null,
-                    OtpInfo = state.Start != null
-                        ? new
-                        {
-                            state.Start.TransactionId,
-                            state.Start.OtpSentTo,
-                            state.Start.OtpExpirySeconds,
-                        }
-                        : null,
-                    NextStep = state.Status == FundInWorkflowStatus.AwaitingOtp
-                        ? "Customer needs to provide the OTP. Use CompleteFundInWorkflow with the workflowId and OTP."
-                        : null,
-                    Error = state.Status == FundInWorkflowStatus.Failed
-                        ? new { state.ErrorMessage, FailedStep = state.FailedAtStep?.ToString() }
-                        : null,
+                    result = r;
+                    _lastResult = r;
                 },
-                JsonOptions
+                onError: ex => error = ex
             );
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Start Fund-In workflow failed");
-            return JsonSerializer.Serialize(
-                new { Success = false, ErrorMessage = ex.Message },
-                JsonOptions
-            );
-        }
-    }
 
-    [Description(
-        "Complete a pending Fund-In workflow after the customer provides the OTP code. "
-            + "Use the workflowId from StartFundInWorkflow."
-    )]
-    public async Task<string> CompleteFundInWorkflow(
-        [Description("Workflow ID from StartFundInWorkflow")] string workflowId,
-        [Description("OTP code provided by the customer")] string otp
-    )
-    {
-        try
-        {
-            logger.LogInformation("Completing Fund-In workflow {WorkflowId} with OTP", workflowId);
-
-            // Retrieve cached state
-            if (!PendingWorkflows.TryGetValue(workflowId, out var state))
+            // Stream progress events and emit to middleware for SignalR
+            await foreach (var progressEvent in channelReader.ReadAllAsync())
             {
-                return JsonSerializer.Serialize(
-                    new
-                    {
-                        Success = false,
-                        ErrorMessage = $"Workflow {workflowId} not found. It may have expired or been completed.",
-                    },
-                    JsonOptions
+                DelegationEventMiddleware.EmitWorkflowProgressEvent(
+                    conversationId,
+                    progressEvent.StepId,
+                    progressEvent.StepName,
+                    progressEvent.StepNameAr,
+                    progressEvent.StepNumber,
+                    progressEvent.TotalSteps,
+                    progressEvent.IsCompleted,
+                    progressEvent.DurationMs,
+                    progressEvent.Details
                 );
             }
 
-            // Remove from cache (one-time use)
-            PendingWorkflows.Remove(workflowId);
+            if (error != null)
+            {
+                logger.LogError(error, "Streaming Fund-In workflow failed");
+                return FormatErrorResult(error.Message);
+            }
 
-            var result = await fundInWorkflow.CompleteAfterOtpAsync(state, otp);
+            if (result == null)
+            {
+                return FormatErrorResult("Workflow completed but no result was generated");
+            }
 
-            return JsonSerializer.Serialize(
-                new
-                {
-                    result.Success,
-                    result.WorkflowId,
-                    Status = result.Status.ToString(),
+            if (!result.Success)
+            {
+                logger.LogWarning(
+                    "Fund-In workflow failed: {TransactionId}, Error: {Error}",
                     result.TransactionId,
-                    result.ReferenceNumber,
-                    result.Amount,
-                    result.Currency,
-                    result.Fees,
-                    result.TotalAmount,
-                    result.Units,
-                    result.NavAtPurchase,
-                    result.SourceAccountId,
-                    result.TargetPortfolioNumber,
-                    result.FundName,
-                    DurationMs = result.Duration.TotalMilliseconds,
-                    result.SummaryEn,
-                    result.SummaryAr,
-                    Error = result.Success
-                        ? null
-                        : new
-                        {
-                            result.ErrorMessage,
-                            result.ErrorCode,
-                            FailedStep = result.FailedAtStep?.ToString(),
-                        },
-                },
-                JsonOptions
+                    result.ErrorMessage
+                );
+                return FormatErrorResult(result.ErrorMessage ?? "Unknown error");
+            }
+
+            logger.LogInformation(
+                "Streaming Fund-In workflow completed: TransactionId={TransactionId}, Ref={RefNum}",
+                result.TransactionId,
+                result.ReferenceNumber
             );
+
+            return FormatSuccessResult(result);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Complete Fund-In workflow failed");
-            return JsonSerializer.Serialize(
-                new { Success = false, ErrorMessage = ex.Message },
-                JsonOptions
-            );
+            logger.LogError(ex, "Fund-In workflow execution failed");
+            return FormatErrorResult(ex.Message);
         }
     }
 
-    [Description("Get the status of pending Fund-In workflows awaiting OTP.")]
-    public string GetPendingWorkflows()
+    /// <summary>
+    /// Get the last workflow result (for retrieval after streaming)
+    /// </summary>
+    public FundInWorkflowResult? GetLastResult() => _lastResult;
+
+    #region Formatting Helpers
+
+    private static string FormatSuccessResult(FundInWorkflowResult result)
     {
-        try
-        {
-            var pending = PendingWorkflows
-                .Values.Select(s => new
-                {
-                    s.WorkflowId,
-                    Status = s.Status.ToString(),
-                    s.Request.Amount,
-                    s.Request.Currency,
-                    s.Request.SourceAccountId,
-                    s.Request.TargetPortfolioNumber,
-                    TransactionId = s.Start?.TransactionId,
-                    OtpSentTo = s.Start?.OtpSentTo,
-                    StartedAt = s.StartedAt,
-                })
-                .ToList();
+        var sb = new StringBuilder();
+        sb.AppendLine("## ✅ Fund-In Transaction Completed Successfully\n");
+        sb.AppendLine("| Field | Value |");
+        sb.AppendLine("|-------|-------|");
+        sb.AppendLine($"| Reference Number | {result.ReferenceNumber} |");
+        sb.AppendLine($"| Transaction ID | {result.TransactionId} |");
+        sb.AppendLine($"| Amount | {result.Amount:N2} {result.Currency} |");
+        sb.AppendLine($"| Fees | {result.Fees:N2} {result.Currency} |");
+        sb.AppendLine($"| Total Amount | {result.TotalAmount:N2} {result.Currency} |");
 
-            return JsonSerializer.Serialize(
-                new
-                {
-                    Success = true,
-                    PendingCount = pending.Count,
-                    Workflows = pending,
-                },
-                JsonOptions
-            );
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Get pending workflows failed");
-            return JsonSerializer.Serialize(
-                new { Success = false, ErrorMessage = ex.Message },
-                JsonOptions
-            );
-        }
+        if (result.Units > 0)
+            sb.AppendLine($"| Units Purchased | {result.Units:N4} |");
+        if (result.NavAtPurchase > 0)
+            sb.AppendLine($"| NAV at Purchase | {result.NavAtPurchase:N4} |");
+        if (!string.IsNullOrEmpty(result.FundName))
+            sb.AppendLine($"| Fund Name | {result.FundName} |");
+
+        sb.AppendLine($"| Source Account | {result.SourceAccountId} |");
+        sb.AppendLine($"| Target Portfolio | {result.TargetPortfolioNumber} |");
+        sb.AppendLine($"| Duration | {result.Duration.TotalMilliseconds:N0}ms |");
+
+        sb.AppendLine();
+        sb.AppendLine($"**English Summary**: {result.SummaryEn}");
+        sb.AppendLine();
+        sb.AppendLine($"**Arabic Summary**: {result.SummaryAr}");
+
+        return sb.ToString();
     }
+
+    private static string FormatErrorResult(string errorMessage)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("## ❌ Fund-In Transaction Failed\n");
+        sb.AppendLine($"**Error**: {errorMessage}");
+        return sb.ToString();
+    }
+
+    #endregion
 }

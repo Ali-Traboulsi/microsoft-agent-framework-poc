@@ -1,5 +1,35 @@
 namespace AgentFrameworkQuickStart.Api.Workflows.FundIn.Messages;
 
+#region Progress Reporting
+
+/// <summary>
+/// Delegate for reporting workflow progress
+/// </summary>
+public delegate void ProgressCallback(WorkflowProgressUpdate update);
+
+/// <summary>
+/// Progress update during workflow execution
+/// </summary>
+public record WorkflowProgressUpdate
+{
+    public required string Step { get; init; }
+    public required string Message { get; init; }
+    public string? MessageAr { get; init; }
+    public ProgressStatus Status { get; init; } = ProgressStatus.InProgress;
+    public DateTime Timestamp { get; init; } = DateTime.UtcNow;
+    public Dictionary<string, object>? Details { get; init; }
+}
+
+public enum ProgressStatus
+{
+    Starting,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+#endregion
+
 #region Workflow Request
 
 /// <summary>
@@ -52,8 +82,7 @@ public record FundInWorkflowState
     // Step Results
     public AccountsContext? AccountsContext { get; init; }
     public PreviewResult? Preview { get; init; }
-    public StartResult? Start { get; init; }
-    public OtpVerificationResult? OtpVerification { get; init; }
+    public ConfirmationResult? Confirmation { get; init; }
     public CommitResult? Commit { get; init; }
 
     // Token for authentication
@@ -74,10 +103,7 @@ public enum FundInWorkflowStatus
     NotStarted,
     FetchingAccounts,
     Previewing,
-    Starting,
-    AwaitingOtp,
-    VerifyingOtp,
-    GeneratingStepUpToken,
+    Confirming,
     Committing,
     Completed,
     Failed,
@@ -91,9 +117,7 @@ public enum FundInWorkflowStep
 {
     AccountsRetrieval,
     Preview,
-    Start,
-    OtpVerification,
-    TokenGeneration,
+    Confirmation,
     Commit,
 }
 
@@ -112,6 +136,8 @@ public record AccountsContext
     public string? SelectedPortfolioNumber { get; init; }
     public decimal SelectedAccountBalance { get; init; }
     public bool HasSufficientFunds { get; init; }
+    public bool AccountFound { get; init; }
+    public bool PortfolioFound { get; init; }
 }
 
 public record AccountInfo
@@ -151,29 +177,16 @@ public record PreviewResult
 }
 
 /// <summary>
-/// Start transaction result (OTP sent)
+/// Confirmation result (after step-up token validation)
+/// Returns IsReadyToCommit when step-up token is valid
 /// </summary>
-public record StartResult
+public record ConfirmationResult
 {
     public bool Success { get; init; }
     public string? TransactionId { get; init; }
     public string Status { get; init; } = "Pending";
-    public string? OtpSentTo { get; init; }
-    public int OtpExpirySeconds { get; init; }
-    public DateTime? CreatedAt { get; init; }
-    public string? ErrorMessage { get; init; }
-}
-
-/// <summary>
-/// OTP verification result
-/// </summary>
-public record OtpVerificationResult
-{
-    public bool Success { get; init; }
-    public bool IsVerified { get; init; }
-    public string? TransactionId { get; init; }
-    public string Status { get; init; } = "Pending";
-    public int RemainingAttempts { get; init; }
+    public bool IsReadyToCommit { get; init; }
+    public DateTime? ConfirmedAt { get; init; }
     public string? ErrorMessage { get; init; }
 }
 

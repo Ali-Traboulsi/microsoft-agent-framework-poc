@@ -138,7 +138,6 @@ public class FundInService(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error fetching account portfolios for CIF: {CIF}", cif);
             return new CustomerAccountPortfoliosResponse
             {
                 Success = false,
@@ -188,15 +187,39 @@ public class FundInService(
             var response = await httpClient.SendAsync(httpRequest);
             var content = await response.Content.ReadAsStringAsync();
 
+            // Log raw response for debugging
+            logger.LogDebug(
+                "Fund-In Preview API Response - Status: {StatusCode}, Content: {Content}",
+                response.StatusCode,
+                content
+            );
+
             var apiResponse = JsonSerializer.Deserialize<SNBApiResponse<FundInPreviewData>>(
                 content,
                 JsonOptions
             );
 
+            // Build detailed error message
+            string? errorMessage = null;
+            if (!(apiResponse?.IsSuccess ?? false))
+            {
+                errorMessage = apiResponse?.Message ?? "Unknown error";
+                if (!response.IsSuccessStatusCode)
+                {
+                    errorMessage =
+                        $"{errorMessage} (HTTP {(int)response.StatusCode}: {response.StatusCode})";
+                }
+                logger.LogWarning(
+                    "Fund-In Preview failed: {Error}. Raw response: {Content}",
+                    errorMessage,
+                    content
+                );
+            }
+
             return new FundInPreviewResponse
             {
                 Success = apiResponse?.IsSuccess ?? false,
-                Message = apiResponse?.Message,
+                Message = errorMessage ?? apiResponse?.Message,
                 Data = apiResponse?.Data,
                 ErrorCode = !response.IsSuccessStatusCode ? response.StatusCode.ToString() : null,
             };
@@ -214,26 +237,26 @@ public class FundInService(
     }
 
     /// <summary>
-    /// Start a fund-in transaction (sends OTP)
+    /// Confirm/Start a fund-in transaction (requires step-up token)
     /// POST /fundin/confirm/start
+    /// Returns ReadyToCommit when token has required scope
     /// </summary>
-    public async Task<FundInStartResponse> StartFundInAsync(
+    public async Task<FundInConfirmStartResponse> ConfirmStartFundInAsync(
         string cif,
-        FundInStartRequest request,
-        string? accessToken = null
+        FundInConfirmStartRequest request,
+        string stepUpToken
     )
     {
-        using var activity = ActivitySource.StartActivity("StartFundIn");
+        using var activity = ActivitySource.StartActivity("ConfirmStartFundIn");
         activity?.SetTag("cif", cif);
-        activity?.SetTag("amount", request.Amount);
+        activity?.SetTag("transaction_id", request.TransactionId);
 
         try
         {
             logger.LogInformation(
-                "Starting fund-in for CIF: {CIF}, Amount: {Amount} {Currency}",
+                "Confirming fund-in for CIF: {CIF}, TransactionId: {TransactionId}",
                 cif,
-                request.Amount,
-                request.Currency
+                request.TransactionId
             );
 
             var httpRequest = new HttpRequestMessage(
@@ -244,30 +267,45 @@ public class FundInService(
                 Content = JsonContent.Create(request, options: JsonOptions),
             };
             httpRequest.Headers.Add("userId", cif);
-            AddAuthHeader(httpRequest, accessToken);
+            AddAuthHeader(httpRequest, stepUpToken);
 
             var response = await httpClient.SendAsync(httpRequest);
             var content = await response.Content.ReadAsStringAsync();
 
-            var apiResponse = JsonSerializer.Deserialize<SNBApiResponse<FundInStartData>>(
+            logger.LogDebug(
+                "Confirm Start API Response - Status: {StatusCode}, Content: {Content}",
+                response.StatusCode,
+                content
+            );
+
+            var apiResponse = JsonSerializer.Deserialize<SNBApiResponse<FundInConfirmStartData>>(
                 content,
                 JsonOptions
             );
 
-            activity?.SetTag("transaction_id", apiResponse?.Data?.TransactionId);
+            var isReadyToCommit =
+                apiResponse?.Data?.Status == "ReadyToCommit"
+                || apiResponse?.Data?.IsReadyToCommit == true
+                || (apiResponse?.IsSuccess == true);
 
-            return new FundInStartResponse
+            return new FundInConfirmStartResponse
             {
                 Success = apiResponse?.IsSuccess ?? false,
                 Message = apiResponse?.Message,
-                Data = apiResponse?.Data,
+                Data =
+                    apiResponse?.Data != null
+                        ? apiResponse.Data with
+                        {
+                            IsReadyToCommit = isReadyToCommit,
+                        }
+                        : null,
                 ErrorCode = !response.IsSuccessStatusCode ? response.StatusCode.ToString() : null,
             };
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error starting fund-in for CIF: {CIF}", cif);
-            return new FundInStartResponse
+            logger.LogError(ex, "Error confirming fund-in for CIF: {CIF}", cif);
+            return new FundInConfirmStartResponse
             {
                 Success = false,
                 Message = ex.Message,
@@ -405,22 +443,25 @@ public class FundInService(
     /// <summary>
     /// Commit/finalize the fund-in transaction
     /// POST /fundin/commit
+    /// Requires transactionId and idempotency key in request body
     /// </summary>
     public async Task<FundInCommitResponse> CommitFundInAsync(
         string cif,
         FundInCommitRequest request,
-        string? accessToken = null
+        string stepUpToken
     )
     {
         using var activity = ActivitySource.StartActivity("CommitFundIn");
         activity?.SetTag("cif", cif);
         activity?.SetTag("transaction_id", request.TransactionId);
+        activity?.SetTag("idempotency_key", request.IdempotencyKey);
 
         try
         {
             logger.LogInformation(
-                "Committing fund-in transaction: {TransactionId}",
-                request.TransactionId
+                "Committing fund-in transaction: {TransactionId} with idempotency key: {IdempotencyKey}",
+                request.TransactionId,
+                request.IdempotencyKey
             );
 
             var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/fundin/commit")
@@ -428,10 +469,16 @@ public class FundInService(
                 Content = JsonContent.Create(request, options: JsonOptions),
             };
             httpRequest.Headers.Add("userId", cif);
-            AddAuthHeader(httpRequest, accessToken);
+            AddAuthHeader(httpRequest, stepUpToken);
 
             var response = await httpClient.SendAsync(httpRequest);
             var content = await response.Content.ReadAsStringAsync();
+
+            logger.LogDebug(
+                "Commit API Response - Status: {StatusCode}, Content: {Content}",
+                response.StatusCode,
+                content
+            );
 
             var apiResponse = JsonSerializer.Deserialize<SNBApiResponse<FundInCommitData>>(
                 content,

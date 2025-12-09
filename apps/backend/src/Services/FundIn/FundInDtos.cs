@@ -15,16 +15,12 @@ public record FundInPreviewRequest
 }
 
 /// <summary>
-/// Request to start a fund-in transaction
+/// Request to confirm/start a fund-in transaction (after preview)
+/// Requires transactionId from preview response
 /// </summary>
-public record FundInStartRequest
+public record FundInConfirmStartRequest
 {
-    public required string SourceAccountId { get; init; }
-    public required string TargetPortfolioNumber { get; init; }
-    public required decimal Amount { get; init; }
-    public string Currency { get; init; } = "SAR";
-    public string? FundId { get; init; }
-    public string? Notes { get; init; }
+    public required string TransactionId { get; init; }
 }
 
 /// <summary>
@@ -46,10 +42,12 @@ public record FundInResendOtpRequest
 
 /// <summary>
 /// Request to commit/finalize a fund-in transaction
+/// Requires transactionId and idempotency key
 /// </summary>
 public record FundInCommitRequest
 {
     public required string TransactionId { get; init; }
+    public required string IdempotencyKey { get; init; }
 }
 
 #endregion
@@ -84,23 +82,22 @@ public record FundInPreviewData
 }
 
 /// <summary>
-/// Response after starting fund-in (OTP sent)
+/// Response after confirming/starting fund-in (ReadyToCommit)
 /// </summary>
-public record FundInStartResponse
+public record FundInConfirmStartResponse
 {
     public bool Success { get; init; }
     public string? Message { get; init; }
-    public FundInStartData? Data { get; init; }
+    public FundInConfirmStartData? Data { get; init; }
     public string? ErrorCode { get; init; }
 }
 
-public record FundInStartData
+public record FundInConfirmStartData
 {
     public string? TransactionId { get; init; }
     public string? Status { get; init; }
-    public string? OtpSentTo { get; init; }
-    public int? OtpExpirySeconds { get; init; }
-    public DateTime? CreatedAt { get; init; }
+    public bool IsReadyToCommit { get; init; }
+    public string? Message { get; init; }
 }
 
 /// <summary>
@@ -155,14 +152,20 @@ public record FundInCommitResponse
 
 public record FundInCommitData
 {
+    public bool Success { get; init; }
     public string? TransactionId { get; init; }
-    public string? ReferenceNumber { get; init; }
-    public string? Status { get; init; }
-    public decimal? Amount { get; init; }
-    public string? Currency { get; init; }
-    public decimal? Units { get; init; }
-    public decimal? NavAtPurchase { get; init; }
+    public string? PaymentReferenceId { get; init; }
+    public string? FxReferenceId { get; init; }
+    public decimal DebitAmount { get; init; }
+    public string? DebitCurrency { get; init; }
+    public decimal CreditAmount { get; init; }
+    public string? CreditCurrency { get; init; }
+    public decimal? ExchangeRate { get; init; }
     public DateTime? CompletedAt { get; init; }
+    public string? Status { get; init; }
+    public string? Message { get; init; }
+    public bool PartialSuccess { get; init; }
+    public string? WarningMessage { get; init; }
 }
 
 /// <summary>

@@ -6,6 +6,9 @@ namespace AgentFrameworkQuickStart.Tools;
 
 /// <summary>
 /// Tools for Fund-In operations with SNB Capital
+/// Provides low-level API access for account discovery and transaction management
+///
+/// For complete fund-in workflow, use FundInWorkflowTools.ExecuteFundInWorkflow instead.
 /// </summary>
 public class FundInTools(
     FundInService fundInService,
@@ -62,7 +65,7 @@ public class FundInTools(
     {
         try
         {
-            logger.LogInformation("Fetching account portfolios for CIF: {CIF}", cif);
+            logger.LogInformation("Fetching portfolios for CIF: {CIF}", cif);
             var response = await fundInService.GetCustomerAccountPortfoliosAsync(cif);
 
             if (!response.Success)
@@ -73,6 +76,7 @@ public class FundInTools(
                 {
                     response.Success,
                     response.Message,
+                    TotalPortfolios = response.Data?.Count ?? 0,
                     Portfolios = response.Data?.Select(p => new
                     {
                         p.PortfolioNumber,
@@ -87,13 +91,13 @@ public class FundInTools(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error fetching account portfolios");
+            logger.LogError(ex, "Error fetching portfolios");
             return $"Error: {ex.Message}";
         }
     }
 
     [Description(
-        "Preview a fund-in transaction before confirmation. Shows fees, estimated units, and total amount. Use this before starting a fund-in."
+        "Preview a fund-in transaction to see fees and estimated units before confirming. Returns transaction preview with fees, estimated units, and transaction ID."
     )]
     public async Task<string> PreviewFundIn(
         [Description("Customer CIF number")] string cif,
@@ -103,10 +107,8 @@ public class FundInTools(
         [Description("Currency (default: SAR)")] string currency = "SAR",
         [Description("Fund ID if investing in a specific mutual fund (optional)")]
             string? fundId = null,
-        [Description(
-            "Access token for authorization (optional - use GenerateTestToken to create one)"
-        )]
-            string? accessToken = null
+        [Description("Optional notes for the transaction")] string? notes = null,
+        [Description("Access token for authorization (optional)")] string? accessToken = null
     )
     {
         try
@@ -145,13 +147,12 @@ public class FundInTools(
                         response.Data?.Currency,
                         response.Data?.Fees,
                         response.Data?.TotalAmount,
-                        response.Data?.SourceAccountId,
-                        response.Data?.TargetPortfolioNumber,
                         response.Data?.FundName,
                         response.Data?.EstimatedUnits,
                         response.Data?.CurrentNav,
                         response.Data?.ExpiresAt,
                     },
+                    NextStep = "Use ConfirmFundIn with transactionId to proceed",
                 },
                 JsonOptions
             );
@@ -164,175 +165,64 @@ public class FundInTools(
     }
 
     [Description(
-        "Start a fund-in transaction. This will send an OTP to the customer for verification. Call PreviewFundIn first to see transaction details."
+        "Confirm a fund-in transaction after preview. Uses step-up token for authorization. Returns ReadyToCommit status when successful."
     )]
-    public async Task<string> StartFundIn(
+    public async Task<string> ConfirmFundIn(
         [Description("Customer CIF number")] string cif,
-        [Description("Source bank account ID")] string sourceAccountId,
-        [Description("Target portfolio number")] string targetPortfolioNumber,
-        [Description("Amount to transfer")] decimal amount,
-        [Description("Currency (default: SAR)")] string currency = "SAR",
-        [Description("Fund ID if investing in a specific mutual fund (optional)")]
-            string? fundId = null,
-        [Description("Optional notes for the transaction")] string? notes = null,
-        [Description(
-            "Access token for authorization (optional - use GenerateTestToken to create one)"
-        )]
+        [Description("Transaction ID from PreviewFundIn")] string transactionId,
+        [Description("Access token for authorization (optional - step-up token will be generated)")]
             string? accessToken = null
     )
     {
         try
         {
-            logger.LogInformation(
-                "Starting fund-in: {Amount} {Currency} from {Account} to {Portfolio}",
-                amount,
-                currency,
-                sourceAccountId,
-                targetPortfolioNumber
-            );
+            logger.LogInformation("Confirming fund-in transaction: {TransactionId}", transactionId);
 
-            var request = new FundInStartRequest
-            {
-                SourceAccountId = sourceAccountId,
-                TargetPortfolioNumber = targetPortfolioNumber,
-                Amount = amount,
-                Currency = currency,
-                FundId = fundId,
-                Notes = notes,
-            };
+            // Generate step-up token if not provided
+            var stepUpToken =
+                accessToken
+                ?? testTokenService.GenerateTestToken(includeStepUpScope: true, expiryHours: 1);
 
-            var response = await fundInService.StartFundInAsync(cif, request, accessToken);
+            var request = new FundInConfirmStartRequest { TransactionId = transactionId };
+
+            var response = await fundInService.ConfirmStartFundInAsync(cif, request, stepUpToken);
 
             if (!response.Success)
-                return $"Error: {response.Message ?? "Failed to start fund-in"} (Code: {response.ErrorCode})";
+                return $"Error: {response.Message ?? "Failed to confirm fund-in"} (Code: {response.ErrorCode})";
 
             return JsonSerializer.Serialize(
                 new
                 {
                     response.Success,
                     response.Message,
-                    Transaction = new
+                    Confirmation = new
                     {
                         response.Data?.TransactionId,
                         response.Data?.Status,
-                        response.Data?.OtpSentTo,
-                        response.Data?.OtpExpirySeconds,
-                        response.Data?.CreatedAt,
+                        response.Data?.IsReadyToCommit,
                     },
-                    NextStep = "Customer needs to verify OTP using VerifyFundInOtp",
+                    NextStep = response.Data?.IsReadyToCommit == true
+                        ? "Use CommitFundIn with transactionId to complete the transaction"
+                        : "Transaction not ready to commit - check status",
                 },
                 JsonOptions
             );
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error starting fund-in");
+            logger.LogError(ex, "Error confirming fund-in");
             return $"Error: {ex.Message}";
         }
     }
 
     [Description(
-        "Verify OTP for a pending fund-in transaction. Call this after the customer receives and provides their OTP."
-    )]
-    public async Task<string> VerifyFundInOtp(
-        [Description("Customer CIF number")] string cif,
-        [Description("Transaction ID from StartFundIn")] string transactionId,
-        [Description("OTP code provided by customer")] string otp,
-        [Description(
-            "Access token for authorization (optional - use GenerateTestToken to create one)"
-        )]
-            string? accessToken = null
-    )
-    {
-        try
-        {
-            logger.LogInformation("Verifying OTP for transaction: {TransactionId}", transactionId);
-
-            var request = new FundInVerifyOtpRequest { TransactionId = transactionId, Otp = otp };
-
-            var response = await fundInService.VerifyOtpAsync(cif, request, accessToken);
-
-            if (!response.Success)
-                return $"Error: {response.Message ?? "OTP verification failed"} (Code: {response.ErrorCode})";
-
-            var result = new
-            {
-                response.Success,
-                response.Message,
-                Verification = new
-                {
-                    response.Data?.TransactionId,
-                    response.Data?.Status,
-                    response.Data?.IsVerified,
-                    response.Data?.RemainingAttempts,
-                },
-                NextStep = response.Data?.IsVerified == true
-                    ? "OTP verified. Call CommitFundIn to complete the transaction"
-                    : "OTP not verified. Check remaining attempts or resend OTP",
-            };
-
-            return JsonSerializer.Serialize(result, JsonOptions);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error verifying OTP");
-            return $"Error: {ex.Message}";
-        }
-    }
-
-    [Description(
-        "Resend OTP for a pending fund-in transaction if the customer didn't receive it or it expired."
-    )]
-    public async Task<string> ResendFundInOtp(
-        [Description("Customer CIF number")] string cif,
-        [Description("Transaction ID from StartFundIn")] string transactionId,
-        [Description("Access token for authorization (optional)")] string? accessToken = null
-    )
-    {
-        try
-        {
-            logger.LogInformation("Resending OTP for transaction: {TransactionId}", transactionId);
-
-            var request = new FundInResendOtpRequest { TransactionId = transactionId };
-
-            var response = await fundInService.ResendOtpAsync(cif, request, accessToken);
-
-            if (!response.Success)
-                return $"Error: {response.Message ?? "Failed to resend OTP"} (Code: {response.ErrorCode})";
-
-            return JsonSerializer.Serialize(
-                new
-                {
-                    response.Success,
-                    response.Message,
-                    OtpResent = new
-                    {
-                        response.Data?.TransactionId,
-                        response.Data?.OtpSentTo,
-                        response.Data?.OtpExpirySeconds,
-                        response.Data?.ResendCount,
-                        response.Data?.MaxResendAttempts,
-                    },
-                },
-                JsonOptions
-            );
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error resending OTP");
-            return $"Error: {ex.Message}";
-        }
-    }
-
-    [Description(
-        "Commit and finalize a fund-in transaction after OTP verification. This completes the money transfer. REQUIRES a step-up access token with bb-su:snbc-fund-in scope."
+        "Commit and finalize a fund-in transaction. This completes the money transfer. "
+            + "REQUIRES confirmation first (ConfirmFundIn must return IsReadyToCommit=true)."
     )]
     public async Task<string> CommitFundIn(
         [Description("Customer CIF number")] string cif,
-        [Description("Transaction ID from StartFundIn")] string transactionId,
-        [Description(
-            "Access token with step-up scope (required - use GenerateTestToken with includeStepUp=true)"
-        )]
+        [Description("Transaction ID from PreviewFundIn/ConfirmFundIn")] string transactionId,
+        [Description("Access token for authorization (optional - step-up token will be generated)")]
             string? accessToken = null
     )
     {
@@ -340,9 +230,21 @@ public class FundInTools(
         {
             logger.LogInformation("Committing fund-in transaction: {TransactionId}", transactionId);
 
-            var request = new FundInCommitRequest { TransactionId = transactionId };
+            // Generate step-up token if not provided
+            var stepUpToken =
+                accessToken
+                ?? testTokenService.GenerateTestToken(includeStepUpScope: true, expiryHours: 1);
 
-            var response = await fundInService.CommitFundInAsync(cif, request, accessToken);
+            // Generate idempotency key for this commit
+            var idempotencyKey = Guid.NewGuid().ToString();
+
+            var request = new FundInCommitRequest
+            {
+                TransactionId = transactionId,
+                IdempotencyKey = idempotencyKey,
+            };
+
+            var response = await fundInService.CommitFundInAsync(cif, request, stepUpToken);
 
             if (!response.Success)
                 return $"Error: {response.Message ?? "Failed to commit fund-in"} (Code: {response.ErrorCode})";
@@ -355,12 +257,10 @@ public class FundInTools(
                     CompletedTransaction = new
                     {
                         response.Data?.TransactionId,
-                        response.Data?.ReferenceNumber,
+                        ReferenceNumber = response.Data?.PaymentReferenceId,
                         response.Data?.Status,
-                        response.Data?.Amount,
-                        response.Data?.Currency,
-                        response.Data?.Units,
-                        response.Data?.NavAtPurchase,
+                        Amount = response.Data?.DebitAmount,
+                        Currency = response.Data?.DebitCurrency,
                         response.Data?.CompletedAt,
                     },
                 },
@@ -399,20 +299,14 @@ public class FundInTools(
                 {
                     response.Success,
                     response.Message,
-                    TransactionStatus = new
+                    Status = new
                     {
                         response.Data?.TransactionId,
                         response.Data?.Status,
-                        response.Data?.StatusDescription,
                         response.Data?.Amount,
                         response.Data?.Currency,
-                        response.Data?.SourceAccountId,
-                        response.Data?.TargetPortfolioNumber,
-                        response.Data?.FundId,
                         response.Data?.CreatedAt,
-                        response.Data?.UpdatedAt,
                         response.Data?.CompletedAt,
-                        response.Data?.ReferenceNumber,
                     },
                 },
                 JsonOptions
@@ -425,22 +319,19 @@ public class FundInTools(
         }
     }
 
-    #region Token Generation
-
     [Description(
-        "Generate a test JWT token for Fund-In operations. FOR DEMO/TESTING ONLY. "
-            + "Use includeStepUp=true when you need to call CommitFundIn (requires bb-su:snbc-fund-in scope)."
+        "Generate a test access token for development/testing. Use includeStepUp=true for commit operations."
     )]
     public string GenerateTestToken(
-        [Description("Include step-up scope (bb-su:snbc-fund-in) required for CommitFundIn")]
+        [Description("Include step-up scope (required for CommitFundIn)")]
             bool includeStepUp = false,
-        [Description("Token validity in hours (default: 24)")] int expiryHours = 24
+        [Description("Token expiry in hours (default: 24)")] int expiryHours = 24
     )
     {
         try
         {
             logger.LogInformation(
-                "Generating test token - StepUp: {StepUp}, ExpiryHours: {Hours}",
+                "Generating test token. StepUp: {StepUp}, Expiry: {Expiry}h",
                 includeStepUp,
                 expiryHours
             );
@@ -451,15 +342,12 @@ public class FundInTools(
                 new
                 {
                     Success = true,
-                    Message = includeStepUp
-                        ? "Generated token with step-up scope for Fund-In commit operations"
-                        : "Generated standard token without step-up scope",
                     Token = token,
-                    HasStepUpScope = includeStepUp,
-                    ExpiresInHours = expiryHours,
-                    Usage = includeStepUp
-                        ? "Use this token for CommitFundIn operations"
-                        : "Use this token for Preview/Start operations. Generate with includeStepUp=true for CommitFundIn",
+                    IncludesStepUpScope = includeStepUp,
+                    ExpiresIn = $"{expiryHours} hours",
+                    Note = includeStepUp
+                        ? "This token can be used for CommitFundIn"
+                        : "This token can be used for preview/confirm operations",
                 },
                 JsonOptions
             );
@@ -470,43 +358,4 @@ public class FundInTools(
             return $"Error: {ex.Message}";
         }
     }
-
-    [Description("Decode and inspect a JWT token to see its claims and validate it.")]
-    public string DecodeToken([Description("The JWT token to decode")] string token)
-    {
-        try
-        {
-            logger.LogInformation("Decoding token");
-
-            var tokenInfo = testTokenService.DecodeToken(token);
-
-            if (tokenInfo == null)
-                return "Error: Failed to decode token - invalid format";
-
-            return JsonSerializer.Serialize(
-                new
-                {
-                    Success = true,
-                    Token = new
-                    {
-                        tokenInfo.Subject,
-                        tokenInfo.Issuer,
-                        Expiry = tokenInfo.Expiry.ToString("o"),
-                        tokenInfo.IsExpired,
-                        tokenInfo.HasStepUpScope,
-                        ClaimCount = tokenInfo.Claims.Count,
-                    },
-                    Warning = tokenInfo.IsExpired ? "Token has expired" : null,
-                },
-                JsonOptions
-            );
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error decoding token");
-            return $"Error: {ex.Message}";
-        }
-    }
-
-    #endregion
 }
