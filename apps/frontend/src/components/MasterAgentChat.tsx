@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { ProjectionResult } from '../interfaces/ProjectionResult.interface';
 import { chatStreamMultiModal, chatStreamWithThread, clearConversation, connect, disconnect, onWorkflowProgress, type MasterStreamResponse, type WorkflowProgressEvent } from '../services/masterAgent';
 import { ChatMessage, TelemetryData } from '../services/masterAgent/types';
@@ -61,6 +62,7 @@ export const MasterAgentChat: React.FC = () => {
   const workflowProgressMessageIdRef = useRef<string | null>(null);
 
   // Handle workflow progress events - defined early for use in SignalR event handler
+  // Uses flushSync to force immediate DOM updates for real-time progress display
   const handleWorkflowProgress = useCallback((chunk: MasterStreamResponse) => {
     console.log('🎯 handleWorkflowProgress called with:', chunk);
     if (!chunk.stepId || chunk.stepNumber === null || chunk.totalSteps === null) {
@@ -79,38 +81,41 @@ export const MasterAgentChat: React.FC = () => {
       details: chunk.stepDetails ?? undefined,
     };
 
-    if (!workflowProgressMessageIdRef.current) {
-      // Create new workflow progress message
-      const newId = `msg-workflow-${Date.now()}`;
-      workflowProgressMessageIdRef.current = newId;
-      setMessages(prev => [...prev, {
-        id: newId,
-        type: 'workflow-progress',
-        content: 'Processing...',
-        timestamp: new Date(),
-        workflowSteps: [newStep],
-      }]);
-    } else {
-      // Update existing workflow progress message
-      setMessages(prev => prev.map(msg => {
-        if (msg.id !== workflowProgressMessageIdRef.current) return msg;
-        
-        const existingSteps = msg.workflowSteps || [];
-        const stepIndex = existingSteps.findIndex(s => s.stepId === newStep.stepId);
-        
-        let updatedSteps: WorkflowStep[];
-        if (stepIndex >= 0) {
-          // Update existing step
-          updatedSteps = [...existingSteps];
-          updatedSteps[stepIndex] = newStep;
-        } else {
-          // Add new step
-          updatedSteps = [...existingSteps, newStep];
-        }
-        
-        return { ...msg, workflowSteps: updatedSteps };
-      }));
-    }
+    // Use flushSync to force immediate React render for real-time progress updates
+    flushSync(() => {
+      if (!workflowProgressMessageIdRef.current) {
+        // Create new workflow progress message
+        const newId = `msg-workflow-${Date.now()}`;
+        workflowProgressMessageIdRef.current = newId;
+        setMessages(prev => [...prev, {
+          id: newId,
+          type: 'workflow-progress',
+          content: 'Processing...',
+          timestamp: new Date(),
+          workflowSteps: [newStep],
+        }]);
+      } else {
+        // Update existing workflow progress message
+        setMessages(prev => prev.map(msg => {
+          if (msg.id !== workflowProgressMessageIdRef.current) return msg;
+          
+          const existingSteps = msg.workflowSteps || [];
+          const stepIndex = existingSteps.findIndex(s => s.stepId === newStep.stepId);
+          
+          let updatedSteps: WorkflowStep[];
+          if (stepIndex >= 0) {
+            // Update existing step
+            updatedSteps = [...existingSteps];
+            updatedSteps[stepIndex] = newStep;
+          } else {
+            // Add new step
+            updatedSteps = [...existingSteps, newStep];
+          }
+          
+          return { ...msg, workflowSteps: updatedSteps };
+        }));
+      }
+    });
   }, []);
 
   // Register for real-time workflow progress events AFTER connection is established

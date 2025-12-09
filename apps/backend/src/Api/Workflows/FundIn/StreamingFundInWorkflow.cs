@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Threading.Channels;
 using AgentFrameworkQuickStart.Api.Abstractions;
+using AgentFrameworkQuickStart.Api.Middleware;
 using AgentFrameworkQuickStart.Api.Workflows.FundIn.Executors;
 using AgentFrameworkQuickStart.Api.Workflows.FundIn.Messages;
 using AgentFrameworkQuickStart.Services;
@@ -139,7 +140,7 @@ public class StreamingFundInWorkflow(
         activity?.SetTag("currency", request.Currency);
         activity?.SetTag("cif", request.Cif);
 
-        // Helper to emit progress via SignalR AND channel
+        // Helper to emit progress via SignalR, DelegationEventMiddleware, AND channel
         async Task EmitProgress(
             int stepIndex,
             bool isCompleted,
@@ -156,6 +157,19 @@ public class StreamingFundInWorkflow(
 
             // Write to channel for internal tracking
             await writer.WriteAsync(progressEvent);
+
+            // Also emit to DelegationEventMiddleware for streaming loop to pick up
+            DelegationEventMiddleware.EmitWorkflowProgressEvent(
+                conversationId,
+                progressEvent.StepId,
+                progressEvent.StepName,
+                progressEvent.StepNameAr,
+                progressEvent.StepNumber,
+                progressEvent.TotalSteps,
+                progressEvent.IsCompleted,
+                progressEvent.DurationMs,
+                progressEvent.Details
+            );
 
             // Push directly to SignalR for real-time updates
             await progressNotifier.NotifyProgressAsync(

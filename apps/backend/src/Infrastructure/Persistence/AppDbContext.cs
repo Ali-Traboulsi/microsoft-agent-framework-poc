@@ -13,6 +13,8 @@ public class AppDbContext : DbContext
 
     public DbSet<ChatThread> Threads => Set<ChatThread>();
     public DbSet<ChatMessage> Messages => Set<ChatMessage>();
+    public DbSet<ConversationMemoryEntry> ConversationMemoryEntries =>
+        Set<ConversationMemoryEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -56,6 +58,27 @@ public class AppDbContext : DbContext
 
             // Composite index for efficient thread message retrieval
             entity.HasIndex(m => new { m.ThreadId, m.SequenceNumber });
+        });
+
+        // Configure ConversationMemoryEntry
+        modelBuilder.Entity<ConversationMemoryEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.AgentName).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.UserRequest).IsRequired();
+            entity.Property(e => e.AgentResponse).IsRequired();
+
+            entity.HasIndex(e => e.ConversationId);
+            entity.HasIndex(e => e.Timestamp);
+            entity.HasIndex(e => new { e.ConversationId, e.SequenceNumber });
+
+            // Optional relationship with ChatThread
+            entity
+                .HasOne(e => e.Thread)
+                .WithMany()
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

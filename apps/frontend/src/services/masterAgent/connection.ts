@@ -118,12 +118,13 @@ export function onWorkflowProgress(
     handler(event);
   };
 
-  connection.on('ReceiveWorkflowProgress', eventHandler);
+  // SignalR JS client uses camelCase for method names
+  connection.on('receiveWorkflowProgress', eventHandler);
   console.log('✅ Registered workflow progress handler');
 
   return () => {
     if (connection) {
-      connection.off('ReceiveWorkflowProgress', eventHandler);
+      connection.off('receiveWorkflowProgress', eventHandler);
       console.log('🔌 Unregistered workflow progress handler');
     }
   };

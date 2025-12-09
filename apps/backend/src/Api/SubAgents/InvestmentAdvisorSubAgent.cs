@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using AgentFrameworkQuickStart.Api.Abstractions;
+using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Tools;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -12,8 +13,8 @@ namespace AgentFrameworkQuickStart.Api.SubAgents;
 /// </summary>
 public class InvestmentAdvisorSubAgent : ISubAgent
 {
-    private readonly IChatClient _chatClient;
     private readonly MutualFundTools _fundTools;
+    private readonly SubAgentThreadManager _threadManager;
     private readonly ILogger<InvestmentAdvisorSubAgent> _logger;
     private readonly Lazy<AIAgent> _agent;
 
@@ -33,18 +34,19 @@ public class InvestmentAdvisorSubAgent : ISubAgent
     public InvestmentAdvisorSubAgent(
         IChatClient chatClient,
         MutualFundTools fundTools,
+        SubAgentThreadManager threadManager,
         ILogger<InvestmentAdvisorSubAgent> logger
     )
     {
-        _chatClient = chatClient;
         _fundTools = fundTools;
+        _threadManager = threadManager;
         _logger = logger;
-        _agent = new Lazy<AIAgent>(CreateAgent);
+        _agent = new Lazy<AIAgent>(() => CreateAgent(chatClient));
     }
 
-    private AIAgent CreateAgent()
+    private AIAgent CreateAgent(IChatClient chatClient)
     {
-        return _chatClient.CreateAIAgent(
+        return chatClient.CreateAIAgent(
             name: Name,
             instructions: $@"You are a knowledgeable Investment Advisor expert.
 
@@ -79,6 +81,7 @@ public class InvestmentAdvisorSubAgent : ISubAgent
 
     public async Task<SubAgentResponse> HandleRequestAsync(
         string request,
+        string conversationId,
         Dictionary<string, object>? context = null
     )
     {
@@ -86,10 +89,29 @@ public class InvestmentAdvisorSubAgent : ISubAgent
 
         try
         {
-            _logger.LogInformation("{SubAgent} handling request: {Request}", Name, request);
+            _logger.LogInformation(
+                "{SubAgent} handling request for conversation {ConversationId}: {Request}",
+                Name,
+                conversationId,
+                request
+            );
 
-            var result = await _agent.Value.RunAsync(request);
+            // Get shared conversation context from previous sub-agent interactions
+            var conversationContext = await _threadManager.GetConversationContextAsync(
+                conversationId
+            );
+
+            // Build the full request with context if available
+            var fullRequest = string.IsNullOrEmpty(conversationContext)
+                ? request
+                : $"{conversationContext}\n\nCurrent request: {request}";
+
+            var thread = _threadManager.GetOrCreateThread(conversationId, Name, _agent.Value);
+            var result = await _agent.Value.RunAsync(fullRequest, thread);
             var responseText = result.Messages.LastOrDefault()?.Text ?? "No response generated";
+
+            // Add this interaction to shared conversation memory
+            _threadManager.AddMemory(conversationId, Name, request, responseText);
 
             sw.Stop();
 
@@ -104,7 +126,7 @@ public class InvestmentAdvisorSubAgent : ISubAgent
                 SubAgentName = Name,
                 Success = true,
                 Result = responseText,
-                ToolsUsed = new List<string>(), // Tools tracked by framework
+                ToolsUsed = new List<string>(),
                 DurationMs = sw.ElapsedMilliseconds,
                 Metadata = context ?? new(),
             };
@@ -135,22 +157,43 @@ public class InvestmentAdvisorSubAgent : ISubAgent
 
     public async IAsyncEnumerable<SubAgentStreamChunk> HandleRequestStreamingAsync(
         string request,
+        string conversationId,
         Dictionary<string, object>? context = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default
     )
     {
-        _logger.LogInformation("{SubAgent} handling streaming request: {Request}", Name, request);
+        _logger.LogInformation(
+            "{SubAgent} handling streaming request for conversation {ConversationId}: {Request}",
+            Name,
+            conversationId,
+            request
+        );
 
-        await foreach (var chunk in _agent.Value.RunStreamingAsync(request))
+        // Get shared conversation context from previous sub-agent interactions
+        var conversationContext = await _threadManager.GetConversationContextAsync(conversationId);
+
+        // Build the full request with context if available
+        var fullRequest = string.IsNullOrEmpty(conversationContext)
+            ? request
+            : $"{conversationContext}\n\nCurrent request: {request}";
+
+        var thread = _threadManager.GetOrCreateThread(conversationId, Name, _agent.Value);
+        var responseBuilder = new System.Text.StringBuilder();
+
+        await foreach (var chunk in _agent.Value.RunStreamingAsync(fullRequest, thread))
         {
             if (cancellationToken.IsCancellationRequested)
                 break;
 
             if (chunk.Text != null)
             {
+                responseBuilder.Append(chunk.Text);
                 yield return new SubAgentStreamChunk { Text = chunk.Text, IsComplete = false };
             }
         }
+
+        // Add this interaction to shared conversation memory
+        _threadManager.AddMemory(conversationId, Name, request, responseBuilder.ToString());
 
         _logger.LogInformation("{SubAgent} streaming completed", Name);
 

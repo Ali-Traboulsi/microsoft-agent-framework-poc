@@ -3,6 +3,7 @@ using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using AgentFrameworkQuickStart.Api.Abstractions;
+using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Tools;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -12,7 +13,13 @@ namespace AgentFrameworkQuickStart.Api.SubAgents;
 /// <summary>
 /// Sub-agent specialized in portfolio management operations
 /// </summary>
-public class PortfolioManagerSubAgent : ISubAgent
+public class PortfolioManagerSubAgent(
+    IChatClient chatClient,
+    PortfolioTools portfolioTools,
+    AccountTools accountTools,
+    SubAgentThreadManager threadManager,
+    ILogger<PortfolioManagerSubAgent> logger
+) : ISubAgent
 {
     // OpenTelemetry observability
     private static readonly ActivitySource ActivitySource = new(
@@ -33,49 +40,52 @@ public class PortfolioManagerSubAgent : ISubAgent
         description: "Duration of request handling"
     );
 
-    private readonly IChatClient _chatClient;
-    private readonly PortfolioTools _portfolioTools;
-    private readonly AccountTools _accountTools;
-    private readonly ILogger<PortfolioManagerSubAgent> _logger;
-    private readonly Lazy<AIAgent> _agent;
+    private readonly IChatClient _chatClient = chatClient;
+    private readonly PortfolioTools _portfolioTools = portfolioTools;
+    private readonly AccountTools _accountTools = accountTools;
+    private readonly SubAgentThreadManager _threadManager = threadManager;
+    private readonly ILogger<PortfolioManagerSubAgent> _logger = logger;
+    private readonly Lazy<AIAgent> _agent = new(
+        CreateAgentFunc(chatClient, portfolioTools, accountTools)
+    );
 
     public string Name => "PortfolioManager";
     public string Domain => "Portfolio Management";
     public string[] Capabilities =>
-        new[]
-        {
+        [
             "Create and manage investment portfolios",
             "Analyze portfolio performance and returns",
             "Get portfolio allocation and composition details",
             "Execute fund purchases for portfolios",
             "Provide portfolio rebalancing recommendations",
             "Track portfolio values and changes over time",
-        };
+        ];
 
-    public PortfolioManagerSubAgent(
+    private static Func<AIAgent> CreateAgentFunc(
         IChatClient chatClient,
         PortfolioTools portfolioTools,
-        AccountTools accountTools,
-        ILogger<PortfolioManagerSubAgent> logger
+        AccountTools accountTools
+    ) => () => CreateAgent(chatClient, portfolioTools, accountTools);
+
+    private static AIAgent CreateAgent(
+        IChatClient chatClient,
+        PortfolioTools portfolioTools,
+        AccountTools accountTools
     )
     {
-        _chatClient = chatClient;
-        _portfolioTools = portfolioTools;
-        _accountTools = accountTools;
-        _logger = logger;
-        _agent = new Lazy<AIAgent>(CreateAgent);
-    }
-
-    private AIAgent CreateAgent()
-    {
-        return _chatClient.CreateAIAgent(
-            name: Name,
+        return chatClient.CreateAIAgent(
+            name: "PortfolioManager",
             instructions: $@"You are a specialized Portfolio Manager expert.
 
-**Your Domain:** {Domain}
+**Your Domain:** Portfolio Management
 
 **Your Capabilities:**
-{string.Join("\n", Capabilities.Select(c => $"- {c}"))}
+- Create and manage investment portfolios
+- Analyze portfolio performance and returns
+- Get portfolio allocation and composition details
+- Execute fund purchases for portfolios
+- Provide portfolio rebalancing recommendations
+- Track portfolio values and changes over time
 
 **Important Guidelines:**
 1. Focus ONLY on portfolio-related requests
@@ -91,18 +101,19 @@ public class PortfolioManagerSubAgent : ISubAgent
 - End with actionable recommendations or next steps",
             tools:
             [
-                AIFunctionFactory.Create(_portfolioTools.CreatePortfolio),
-                AIFunctionFactory.Create(_portfolioTools.GetPortfolioDetails),
-                AIFunctionFactory.Create(_portfolioTools.ListPortfolios),
-                AIFunctionFactory.Create(_portfolioTools.GetPortfolioAllocation),
-                AIFunctionFactory.Create(_accountTools.FundPortfolio),
-                AIFunctionFactory.Create(_accountTools.GetAccountBalance),
+                AIFunctionFactory.Create(portfolioTools.CreatePortfolio),
+                AIFunctionFactory.Create(portfolioTools.GetPortfolioDetails),
+                AIFunctionFactory.Create(portfolioTools.ListPortfolios),
+                AIFunctionFactory.Create(portfolioTools.GetPortfolioAllocation),
+                AIFunctionFactory.Create(accountTools.FundPortfolio),
+                AIFunctionFactory.Create(accountTools.GetAccountBalance),
             ]
         );
     }
 
     public async Task<SubAgentResponse> HandleRequestAsync(
         string request,
+        string conversationId,
         Dictionary<string, object>? context = null
     )
     {
@@ -117,10 +128,29 @@ public class PortfolioManagerSubAgent : ISubAgent
 
         try
         {
-            _logger.LogInformation("{SubAgent} handling request: {Request}", Name, request);
+            _logger.LogInformation(
+                "{SubAgent} handling request for conversation {ConversationId}: {Request}",
+                Name,
+                conversationId,
+                request
+            );
 
-            var result = await _agent.Value.RunAsync(request);
+            // Get shared conversation context from previous sub-agent interactions
+            var conversationContext = await _threadManager.GetConversationContextAsync(
+                conversationId
+            );
+
+            // Build the full request with context if available
+            var fullRequest = string.IsNullOrEmpty(conversationContext)
+                ? request
+                : $"{conversationContext}\n\nCurrent request: {request}";
+
+            var thread = _threadManager.GetOrCreateThread(conversationId, Name, _agent.Value);
+            var result = await _agent.Value.RunAsync(fullRequest, thread);
             var responseText = result.Messages.LastOrDefault()?.Text ?? "No response generated";
+
+            // Add this interaction to shared conversation memory
+            _threadManager.AddMemory(conversationId, Name, request, responseText);
 
             sw.Stop();
 
@@ -191,22 +221,43 @@ public class PortfolioManagerSubAgent : ISubAgent
 
     public async IAsyncEnumerable<SubAgentStreamChunk> HandleRequestStreamingAsync(
         string request,
+        string conversationId,
         Dictionary<string, object>? context = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default
     )
     {
-        _logger.LogInformation("{SubAgent} handling streaming request: {Request}", Name, request);
+        _logger.LogInformation(
+            "{SubAgent} handling streaming request for conversation {ConversationId}: {Request}",
+            Name,
+            conversationId,
+            request
+        );
 
-        await foreach (var chunk in _agent.Value.RunStreamingAsync(request))
+        // Get shared conversation context from previous sub-agent interactions
+        var conversationContext = await _threadManager.GetConversationContextAsync(conversationId);
+
+        // Build the full request with context if available
+        var fullRequest = string.IsNullOrEmpty(conversationContext)
+            ? request
+            : $"{conversationContext}\n\nCurrent request: {request}";
+
+        var thread = _threadManager.GetOrCreateThread(conversationId, Name, _agent.Value);
+        var responseBuilder = new System.Text.StringBuilder();
+
+        await foreach (var chunk in _agent.Value.RunStreamingAsync(fullRequest, thread))
         {
             if (cancellationToken.IsCancellationRequested)
                 break;
 
             if (chunk.Text != null)
             {
+                responseBuilder.Append(chunk.Text);
                 yield return new SubAgentStreamChunk { Text = chunk.Text, IsComplete = false };
             }
         }
+
+        // Add this interaction to shared conversation memory
+        _threadManager.AddMemory(conversationId, Name, request, responseBuilder.ToString());
 
         _logger.LogInformation("{SubAgent} streaming completed", Name);
 

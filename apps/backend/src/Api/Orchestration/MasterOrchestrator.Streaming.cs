@@ -42,9 +42,22 @@ public partial class MasterOrchestrator
         var lastEventCheck = DateTime.UtcNow;
         var hasSeenDelegation = false;
         var hasStartedThinking = false;
-
+        var _hasEmittedThinkingContent = false;
         try
         {
+            // If thinking is enabled, emit an initial thinking message immediately
+            if (enableThinking)
+            {
+                hasStartedThinking = true;
+                isInThinkingBlock = true;
+                yield return new OrchestratorResponse
+                {
+                    Type = ResponseType.Thinking,
+                    Content = "Analyzing your request...\n",
+                };
+                _hasEmittedThinkingContent = true;
+            }
+
             await foreach (var chunk in _masterAgent.Value.RunStreamingAsync(userMessage, thread))
             {
                 // Check for new delegation events FIRST
@@ -56,6 +69,23 @@ public partial class MasterOrchestrator
                 )
                 {
                     hasSeenDelegation = true;
+
+                    // If thinking is enabled and we haven't emitted thinking content yet,
+                    // emit synthetic thinking based on the delegation event
+                    if (enableThinking && isInThinkingBlock)
+                    {
+                        var thinkingContent = GenerateThinkingFromDelegation(delegationEvent);
+                        if (!string.IsNullOrEmpty(thinkingContent))
+                        {
+                            yield return new OrchestratorResponse
+                            {
+                                Type = ResponseType.Thinking,
+                                Content = thinkingContent,
+                            };
+                            _hasEmittedThinkingContent = true;
+                        }
+                    }
+
                     isInThinkingBlock = false; // End thinking when delegation starts
                     yield return ConvertDelegationEventToResponse(delegationEvent);
                 }
@@ -229,9 +259,23 @@ public partial class MasterOrchestrator
         var chunkCount = 0;
         var hasSeenDelegation = false;
         var hasStartedThinking = false;
+        var _hasEmittedThinkingContent = false;
 
         try
         {
+            // If thinking is enabled, emit an initial thinking message immediately
+            if (enableThinking)
+            {
+                hasStartedThinking = true;
+                isInThinkingBlock = true;
+                yield return new OrchestratorResponse
+                {
+                    Type = ResponseType.Thinking,
+                    Content = "Analyzing your request...\n",
+                };
+                _hasEmittedThinkingContent = true;
+            }
+
             await foreach (
                 var chunk in _masterAgent.Value.RunStreamingAsync(contextualMessage, thread)
             )
@@ -245,6 +289,23 @@ public partial class MasterOrchestrator
                 )
                 {
                     hasSeenDelegation = true;
+
+                    // If thinking is enabled and we're still in thinking block,
+                    // emit synthetic thinking based on the delegation event
+                    if (enableThinking && isInThinkingBlock)
+                    {
+                        var thinkingContent = GenerateThinkingFromDelegation(delegationEvent);
+                        if (!string.IsNullOrEmpty(thinkingContent))
+                        {
+                            yield return new OrchestratorResponse
+                            {
+                                Type = ResponseType.Thinking,
+                                Content = thinkingContent,
+                            };
+                            _hasEmittedThinkingContent = true;
+                        }
+                    }
+
                     isInThinkingBlock = false;
                     yield return ConvertDelegationEventToResponse(delegationEvent);
                 }

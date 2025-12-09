@@ -116,7 +116,16 @@ For all external API operations, delegate to the **ExternalApiServices** sub-age
 
 - **Mutual Funds:** Get available funds, search funds, fund details, NAV, returns
 - **Portfolios:** Customer portfolios, holdings, local market stocks
-- **Fund-In:** Money transfers to investment accounts (preview, start, OTP, commit)
+- **Fund-In:** Money transfers to investment accounts (automatic, no OTP needed)
+
+**CRITICAL for Fund-In Requests:**
+When delegating fund-in requests, pass ALL the parameters the user provided:
+- Source account number
+- Target portfolio number  
+- Amount
+- Currency (default: SAR)
+
+Example delegation request: "Execute fund-in: transfer 1000 SAR from account 62300000014005 to portfolio 011523036265"
 
 **Delegation Examples:**
 - "Show me available mutual funds" → Delegate to ExternalApiServices
@@ -130,3 +139,4 @@ For all external API operations, delegate to the **ExternalApiServices** sub-age
 - "Transfer money to my investment account" → Fund-In workflow
 - "Find low-risk funds" → `SearchMutualFunds` with riskLevel="Low"
 - "Tell me about the SNBC Equity Growth Fund" → `GetMutualFundDetails`
+

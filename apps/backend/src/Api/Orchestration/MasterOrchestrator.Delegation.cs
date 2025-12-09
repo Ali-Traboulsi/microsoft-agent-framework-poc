@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using AgentFrameworkQuickStart.Api.DTOs;
+using AgentFrameworkQuickStart.Api.Middleware;
 
 namespace AgentFrameworkQuickStart.Api.Orchestration;
 
@@ -57,8 +57,12 @@ public partial class MasterOrchestrator
             ? null
             : JsonSerializer.Deserialize<Dictionary<string, object>>(context);
 
+        // Get conversation ID for sub-agent thread management
+        var conversationId =
+            DelegationEventMiddleware.CurrentConversationId ?? Guid.NewGuid().ToString();
+
         var sw = Stopwatch.StartNew();
-        var response = await subAgent.HandleRequestAsync(request, contextDict);
+        var response = await subAgent.HandleRequestAsync(request, conversationId, contextDict);
         sw.Stop();
 
         // Record metrics

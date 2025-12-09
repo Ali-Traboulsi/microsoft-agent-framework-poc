@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.Orchestration;
+using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Tools;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -18,6 +19,7 @@ public class ExternalApiSubAgent(
     SNBCapitalTools snbCapitalTools,
     FundInTools fundInTools,
     FundInWorkflowTools fundInWorkflowTools,
+    SubAgentThreadManager threadManager,
     ILogger<ExternalApiSubAgent> logger
 ) : ISubAgent
 {
@@ -80,6 +82,7 @@ public class ExternalApiSubAgent(
 
     public async Task<SubAgentResponse> HandleRequestAsync(
         string request,
+        string conversationId,
         Dictionary<string, object>? context = null
     )
     {
@@ -87,17 +90,38 @@ public class ExternalApiSubAgent(
 
         try
         {
-            logger.LogInformation("{SubAgent} handling request: {Request}", Name, request);
+            logger.LogInformation(
+                "{SubAgent} handling request for conversation {ConversationId}: {Request}",
+                Name,
+                conversationId,
+                request
+            );
 
-            var result = await _agent.Value.RunAsync(request);
+            // Get shared conversation context from previous sub-agent interactions
+            var conversationContext = await threadManager.GetConversationContextAsync(
+                conversationId
+            );
+
+            // Build the full request with context if available
+            var fullRequest = string.IsNullOrEmpty(conversationContext)
+                ? request
+                : $"{conversationContext}\n\nCurrent request: {request}";
+
+            // Get or create thread for this conversation to maintain context
+            var thread = threadManager.GetOrCreateThread(conversationId, Name, _agent.Value);
+            var result = await _agent.Value.RunAsync(fullRequest, thread);
             var responseText = result.Messages.LastOrDefault()?.Text ?? "No response generated";
+
+            // Add this interaction to shared conversation memory
+            threadManager.AddMemory(conversationId, Name, request, responseText);
 
             sw.Stop();
 
             logger.LogInformation(
-                "{SubAgent} completed in {Duration}ms",
+                "{SubAgent} completed in {Duration}ms for conversation {ConversationId}",
                 Name,
-                sw.ElapsedMilliseconds
+                sw.ElapsedMilliseconds,
+                conversationId
             );
 
             return new SubAgentResponse
@@ -136,22 +160,44 @@ public class ExternalApiSubAgent(
 
     public async IAsyncEnumerable<SubAgentStreamChunk> HandleRequestStreamingAsync(
         string request,
+        string conversationId,
         Dictionary<string, object>? context = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default
     )
     {
-        logger.LogInformation("{SubAgent} handling streaming request: {Request}", Name, request);
+        logger.LogInformation(
+            "{SubAgent} handling streaming request for conversation {ConversationId}: {Request}",
+            Name,
+            conversationId,
+            request
+        );
 
-        await foreach (var chunk in _agent.Value.RunStreamingAsync(request))
+        // Get shared conversation context from previous sub-agent interactions
+        var conversationContext = await threadManager.GetConversationContextAsync(conversationId);
+
+        // Build the full request with context if available
+        var fullRequest = string.IsNullOrEmpty(conversationContext)
+            ? request
+            : $"{conversationContext}\n\nCurrent request: {request}";
+
+        // Get or create thread for this conversation to maintain context
+        var thread = threadManager.GetOrCreateThread(conversationId, Name, _agent.Value);
+        var responseBuilder = new System.Text.StringBuilder();
+
+        await foreach (var chunk in _agent.Value.RunStreamingAsync(fullRequest, thread))
         {
             if (cancellationToken.IsCancellationRequested)
                 break;
 
             if (chunk.Text != null)
             {
+                responseBuilder.Append(chunk.Text);
                 yield return new SubAgentStreamChunk { Text = chunk.Text, IsComplete = false };
             }
         }
+
+        // Add this interaction to shared conversation memory
+        threadManager.AddMemory(conversationId, Name, request, responseBuilder.ToString());
 
         yield return new SubAgentStreamChunk { IsComplete = true };
     }

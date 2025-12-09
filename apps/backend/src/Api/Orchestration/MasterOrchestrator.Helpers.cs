@@ -49,6 +49,61 @@ public partial class MasterOrchestrator
     }
 
     /// <summary>
+    /// Generate synthetic thinking content based on delegation events
+    /// This provides visual feedback when the AI doesn't produce reasoning text
+    /// </summary>
+    private static string GenerateThinkingFromDelegation(DelegationEvent? delegationEvent)
+    {
+        if (delegationEvent == null)
+            return string.Empty;
+
+        return delegationEvent.Type switch
+        {
+            DelegationEventType.SubAgentDelegationStart =>
+                $"I need to consult the **{delegationEvent.SubAgentName}** for this request.\n",
+
+            DelegationEventType.ToolExecutionStart
+                when !string.IsNullOrEmpty(delegationEvent.ToolName) => GetThinkingForTool(
+                delegationEvent.ToolName,
+                delegationEvent.FunctionName
+            ),
+
+            _ => string.Empty,
+        };
+    }
+
+    /// <summary>
+    /// Generate thinking content based on the tool being executed
+    /// </summary>
+    private static string GetThinkingForTool(string toolName, string? functionName)
+    {
+        // Generate descriptive thinking based on common tool patterns
+        var lowerToolName = toolName.ToLowerInvariant();
+        var lowerFunctionName = functionName?.ToLowerInvariant() ?? "";
+
+        if (lowerToolName.Contains("fundin") || lowerFunctionName.Contains("fundin"))
+            return "I'll initiate the fund-in workflow to transfer funds to the investment portfolio.\n";
+
+        if (lowerToolName.Contains("projection") || lowerFunctionName.Contains("projection"))
+            return "I'll calculate profit projections based on your investment parameters.\n";
+
+        if (lowerToolName.Contains("portfolio") || lowerFunctionName.Contains("portfolio"))
+            return "I'll retrieve your portfolio information.\n";
+
+        if (lowerToolName.Contains("account") || lowerFunctionName.Contains("account"))
+            return "I'll fetch your account details.\n";
+
+        if (lowerToolName.Contains("fund") || lowerFunctionName.Contains("fund"))
+            return "I'll look up the mutual fund information.\n";
+
+        if (lowerToolName.Contains("search") || lowerFunctionName.Contains("search"))
+            return "I'll search for relevant information.\n";
+
+        // Default thinking for unknown tools
+        return $"I'll use the **{toolName}** to process your request.\n";
+    }
+
+    /// <summary>
     /// Convert middleware delegation event to orchestrator response
     /// </summary>
     private OrchestratorResponse ConvertDelegationEventToResponse(DelegationEvent delegationEvent)

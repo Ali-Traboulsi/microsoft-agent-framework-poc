@@ -15,8 +15,9 @@ public class WorkflowProgressNotifier(
 {
     /// <summary>
     /// Push a workflow progress event to a specific conversation
+    /// Uses fire-and-forget pattern to ensure events are sent immediately without blocking
     /// </summary>
-    public async Task NotifyProgressAsync(
+    public Task NotifyProgressAsync(
         string conversationId,
         string stepId,
         string stepName,
@@ -58,9 +59,25 @@ public class WorkflowProgressNotifier(
             isCompleted
         );
 
-        // Send to all clients - they will filter by conversationId on the client side
-        // Using "ReceiveWorkflowProgress" event which frontend will listen to
-        await hubContext.Clients.All.SendAsync("ReceiveWorkflowProgress", conversationId, response);
+        // Fire-and-forget: Queue the send operation without awaiting
+        // This ensures workflow progress is pushed immediately without blocking the workflow
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await hubContext.Clients.All.SendAsync(
+                    "ReceiveWorkflowProgress",
+                    conversationId,
+                    response
+                );
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to push workflow progress via SignalR");
+            }
+        });
+
+        return Task.CompletedTask;
     }
 
     /// <summary>

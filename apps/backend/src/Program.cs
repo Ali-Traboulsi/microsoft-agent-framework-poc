@@ -248,6 +248,9 @@ builder.Services.AddSingleton<InvestmentDataStore>();
 // Register agent thread manager (Singleton - manages conversation threads)
 builder.Services.AddSingleton<AgentThreadManager>();
 
+// Register sub-agent thread manager (Singleton - manages sub-agent conversation threads)
+builder.Services.AddSingleton<SubAgentThreadManager>();
+
 // Register audio transcription service (Scoped)
 builder.Services.AddHttpClient<AudioTranscriptionService>();
 

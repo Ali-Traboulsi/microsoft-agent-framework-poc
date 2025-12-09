@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using AgentFrameworkQuickStart.Api.Abstractions;
+using AgentFrameworkQuickStart.Api.Middleware;
 
 namespace AgentFrameworkQuickStart.Api.Workflows;
 
@@ -202,7 +203,11 @@ public class CompleteInvestmentWorkflow : IWorkflow
                 subAgentName
             );
 
-            var response = await subAgent.HandleRequestAsync(request);
+            // Get conversation ID for sub-agent context sharing
+            var conversationId =
+                DelegationEventMiddleware.CurrentConversationId ?? Guid.NewGuid().ToString();
+
+            var response = await subAgent.HandleRequestAsync(request, conversationId);
             sw.Stop();
 
             return new WorkflowStep
