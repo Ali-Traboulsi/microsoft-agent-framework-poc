@@ -28,6 +28,7 @@ public enum IntentType
     MutualFundDetails,
     FundInOperation,
     SNBCapitalQuery,
+    CustomerDataLookup, // CIF-based customer data lookups
 
     // Compliance Intents
     ComplianceCheck,

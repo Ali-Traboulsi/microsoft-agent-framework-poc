@@ -51,6 +51,7 @@ public class IntentClassifier(IChatClient chatClient, ILogger<IntentClassifier> 
         - MutualFundSearch: User searching for mutual funds
         - MutualFundDetails: User wants details about a specific fund
         - FundInOperation: User wants to add money to investment account
+        - CustomerDataLookup: User wants account/portfolio data by CIF number (use ExternalApiServices)
         - ComplianceCheck: User asking about compliance/regulations
         - GeneralInquiry: General questions about the platform
         - WebSearch: Request for current news/market info
@@ -98,6 +99,60 @@ public class IntentClassifier(IChatClient chatClient, ILogger<IntentClassifier> 
         - duration: 36 months (if time horizon needed but not specified)
         - risk_level: Moderate (if risk needed but not specified)
         - shariah_compliant: false (unless explicitly requested)
+
+        ## Few-Shot Examples (Learn from these)
+
+        ### Example 1: CIF Lookup
+        User: "give me the account details for CIF 100000000005"
+        Analysis:
+        - Intent: CustomerDataLookup
+        - Entities: [{type: "customer_id", value: "100000000005"}]
+        - SubAgent: ExternalApiServices
+        - Strategy: SingleAgent
+        - RefinedRequest: "Get complete customer data for CIF 100000000005"
+
+        ### Example 2: Fund-In Transfer
+        User: "transfer 5000 SAR from account 62300000014005 to portfolio 011123036269"
+        Analysis:
+        - Intent: FundInOperation
+        - Entities: [{type: "amount", value: 5000}, {type: "account_id", value: "62300000014005"}, {type: "portfolio_id", value: "011123036269"}]
+        - SubAgent: ExternalApiServices
+        - Strategy: SingleAgent
+        - RefinedRequest: "Execute fund-in: transfer 5000 SAR from 62300000014005 to 011123036269"
+
+        ### Example 3: Investment Projection
+        User: "what if I invest 200k for 5 years"
+        Analysis:
+        - Intent: ProfitProjection
+        - Entities: [{type: "amount", value: 200000}, {type: "duration", value: 60}]
+        - SubAgent: ProfitProjection
+        - Strategy: SingleAgent
+        - AppliedDefaults: {risk_level: "Moderate", currency: "SAR"}
+
+        ### Example 4: Portfolio Query
+        User: "show me my portfolios"
+        Analysis:
+        - Intent: PortfolioAnalysis
+        - Entities: []
+        - SubAgent: ExternalApiServices
+        - Strategy: SingleAgent
+        - AppliedDefaults: {customer_id: "100000000005"}
+
+        ### Example 5: Mutual Fund Search
+        User: "what mutual funds are available?"
+        Analysis:
+        - Intent: MutualFundSearch
+        - Entities: []
+        - SubAgent: ExternalApiServices
+        - Strategy: SingleAgent
+
+        ### Example 6: Follow-up Reference
+        User: "do it" (after previous recommendation)
+        Analysis:
+        - Intent: Confirmation
+        - Entities: []
+        - Strategy: SingleAgent
+        - Note: Refers to previously suggested action
 
         Analyze this message and respond with valid JSON only:
         """;

@@ -77,14 +77,37 @@ public partial class MasterOrchestrator
                 };
             }
 
-            // Classify intent
+            // Try fast pattern matching first (for obvious intents)
+            var fastMatch = _fastIntentMatcher.TryMatch(message);
             var classificationSw = Stopwatch.StartNew();
-            classifiedIntent = await _intentClassifier.ClassifyAsync(
-                message,
-                context,
-                effectiveCancellation
-            );
-            classificationSw.Stop();
+
+            if (fastMatch != null && fastMatch.Confidence >= 0.85)
+            {
+                // Fast path - use pattern-matched intent
+                classifiedIntent = fastMatch.ToUserIntent(message);
+                classificationSw.Stop();
+
+                _logger.LogInformation(
+                    "FastIntentMatcher matched: {Intent} (confidence: {Confidence:P0}) - Reason: {Reason}",
+                    classifiedIntent.PrimaryIntent,
+                    classifiedIntent.Confidence,
+                    fastMatch.MatchReason
+                );
+
+                activity?.SetTag("intent.source", "fast_match");
+            }
+            else
+            {
+                // Fall back to LLM classification
+                classifiedIntent = await _intentClassifier.ClassifyAsync(
+                    message,
+                    context,
+                    effectiveCancellation
+                );
+                classificationSw.Stop();
+
+                activity?.SetTag("intent.source", "llm_classifier");
+            }
 
             IntentClassificationCounter.Add(
                 1,

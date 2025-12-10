@@ -338,11 +338,15 @@ builder.Services.AddScoped<StructuredResponseHandler>();
 
 // ===== Intelligence Layer (P0) =====
 // All chat requests use intelligent processing by default:
+// - Fast Intent Matcher: Pattern-based fast path for obvious intents
 // - Intent Classification: Semantic understanding of user requests
 // - Context Store: Persistent conversation context and entity tracking
+builder.Services.AddScoped<FastIntentMatcher>();
 builder.Services.AddScoped<IIntentClassifier, IntentClassifier>();
 builder.Services.AddScoped<IConversationContextStore, DatabaseConversationContextStore>();
-Console.WriteLine("🧠 Intelligence Layer enabled: Intent Classification + Database Context Store");
+Console.WriteLine(
+    "🧠 Intelligence Layer enabled: FastIntentMatcher + Intent Classification + Database Context Store"
+);
 
 // Register SignalR Hub Handlers
 builder.Services.AddScoped<IChatHandler, ChatStreamHandler>();

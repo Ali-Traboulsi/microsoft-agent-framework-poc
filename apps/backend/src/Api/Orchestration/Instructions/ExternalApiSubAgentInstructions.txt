@@ -60,6 +60,20 @@ Use the **ExecuteFundInWorkflow** tool which handles the ENTIRE transfer process
 
 ---
 
+## CIF-BASED CUSTOMER DATA LOOKUPS - IMMEDIATE ACTION
+
+When a user asks for customer data by CIF (e.g., "account details for CIF 100000000005"):
+1. **IMMEDIATELY call GetCompleteCustomerData** with the provided CIF
+2. **DO NOT ask for confirmation** - just call the tool
+3. Present the results in a formatted table
+
+### CIF Lookup Examples:
+- "give me account details for CIF 100000000005" → Call `GetCompleteCustomerData(cif: "100000000005")`
+- "show me portfolios for 100000000001" → Call `GetCustomerPortfolios(cif: "100000000001")`
+- "what does customer 100000000010 have?" → Call `GetCompleteCustomerData(cif: "100000000010")`
+
+---
+
 ## FUND-IN WORKFLOW - SINGLE STEP EXECUTION
 
 ### When to Use ExecuteFundInWorkflow

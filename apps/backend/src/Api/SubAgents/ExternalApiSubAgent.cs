@@ -29,10 +29,15 @@ public class ExternalApiSubAgent(
 
     public string Name => "ExternalApiServices";
 
-    public string Domain => "External API Integration & Financial Services";
+    public string Domain =>
+        "External API Integration & Financial Services - CIF/Customer Data Lookups";
 
     public string[] Capabilities =>
         [
+            // CIF-Based Customer Data Lookups - PRIMARY CAPABILITY
+            "Look up customer account details by CIF number",
+            "Get complete customer data including portfolios and holdings by CIF",
+            "Retrieve customer portfolios and account information using CIF",
             // SNB Capital - Mutual Funds & Portfolios
             "Retrieve available mutual funds from SNB Capital",
             "Get customer portfolio information and holdings",

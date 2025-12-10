@@ -2,9 +2,9 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.Middleware;
-using AgentFrameworkQuickStart.Core.Domain.Intelligence;
 using AgentFrameworkQuickStart.Core.Interfaces;
 using AgentFrameworkQuickStart.Services;
+using AgentFrameworkQuickStart.Services.Intelligence;
 using AgentFrameworkQuickStart.Tools;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -50,6 +50,7 @@ public partial class MasterOrchestrator : IMasterOrchestrator
     // Intelligence Layer (P0)
     private readonly IIntentClassifier _intentClassifier;
     private readonly IConversationContextStore _contextStore;
+    private readonly FastIntentMatcher _fastIntentMatcher;
 
     // Metrics for intelligence layer
     private static readonly Counter<long> IntentClassificationCounter = Meter.CreateCounter<long>(
@@ -73,7 +74,8 @@ public partial class MasterOrchestrator : IMasterOrchestrator
         SubAgentThreadManager subAgentThreadManager,
         ProjectionTools projectionTools,
         IIntentClassifier intentClassifier,
-        IConversationContextStore contextStore
+        IConversationContextStore contextStore,
+        FastIntentMatcher fastIntentMatcher
     )
     {
         _chatClient = chatClient;
@@ -86,6 +88,7 @@ public partial class MasterOrchestrator : IMasterOrchestrator
         _projectionTools = projectionTools;
         _intentClassifier = intentClassifier;
         _contextStore = contextStore;
+        _fastIntentMatcher = fastIntentMatcher;
         _subAgentLookup = subAgents.ToDictionary(sa => sa.Name, sa => sa);
         _masterAgent = new Lazy<AIAgent>(CreateMasterAgentWithMiddleware);
     }
