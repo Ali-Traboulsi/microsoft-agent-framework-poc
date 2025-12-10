@@ -44,6 +44,7 @@ public partial class MasterOrchestrator : IMasterOrchestrator
     private readonly Dictionary<string, ISubAgent> _subAgentLookup;
     private readonly WebSearchTools _webSearchTools;
     private readonly AgentThreadManager _threadManager;
+    private readonly SubAgentThreadManager _subAgentThreadManager;
     private readonly ProjectionTools _projectionTools;
 
     // Intelligence Layer (P0)
@@ -69,6 +70,7 @@ public partial class MasterOrchestrator : IMasterOrchestrator
         ILogger<MasterOrchestrator> logger,
         ILoggerFactory loggerFactory,
         AgentThreadManager threadManager,
+        SubAgentThreadManager subAgentThreadManager,
         ProjectionTools projectionTools,
         IIntentClassifier intentClassifier,
         IConversationContextStore contextStore
@@ -80,6 +82,7 @@ public partial class MasterOrchestrator : IMasterOrchestrator
         _logger = logger;
         _loggerFactory = loggerFactory;
         _threadManager = threadManager;
+        _subAgentThreadManager = subAgentThreadManager;
         _projectionTools = projectionTools;
         _intentClassifier = intentClassifier;
         _contextStore = contextStore;

@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 namespace AgentFrameworkQuickStart.Services.Intelligence;
 
 /// <summary>
-/// /// Database-backed implementation of conversation context store
+/// Database-backed implementation of conversation context store
 /// Provides persistence, horizontal scaling support, and conversation history
 /// </summary>
 public class DatabaseConversationContextStore(
@@ -238,6 +238,9 @@ public class DatabaseConversationContextStore(
             Constraints = context.ActiveConstraints.ToList(),
         };
 
+        // Load conversation history from database for multi-turn context awareness
+        briefing.ConversationHistory = await LoadConversationHistoryAsync(conversationId);
+
         foreach (var finding in context.SubAgentFindings.Values.OrderBy(f => f.FoundAt))
         {
             briefing.PreviousAgentActions.Add($"{finding.SubAgentName}: {finding.Summary}");
@@ -271,12 +274,134 @@ public class DatabaseConversationContextStore(
         briefing.ExpectedFocus = currentIntent.IntentSummary;
 
         logger.LogDebug(
-            "Generated briefing for {SubAgent} in conversation {ConversationId}",
+            "Generated briefing for {SubAgent} in conversation {ConversationId} with {HistoryCount} history turns",
             subAgentName,
-            conversationId
+            conversationId,
+            briefing.ConversationHistory.Count
         );
 
         return briefing;
+    }
+
+    /// <summary>
+    /// Load recent conversation history from database for context awareness
+    /// </summary>
+    private async Task<List<ConversationTurn>> LoadConversationHistoryAsync(
+        string conversationId,
+        int maxTurns = 10
+    )
+    {
+        if (!Guid.TryParse(conversationId, out var conversationGuid))
+        {
+            return [];
+        }
+
+        try
+        {
+            var entries = await dbContext
+                .ConversationMemoryEntries.Where(e => e.ConversationId == conversationGuid)
+                .OrderByDescending(e => e.SequenceNumber)
+                .Take(maxTurns)
+                .OrderBy(e => e.SequenceNumber) // Re-order chronologically
+                .ToListAsync();
+
+            var turns = new List<ConversationTurn>();
+            var turnNumber = 1;
+
+            foreach (var entry in entries)
+            {
+                turns.Add(
+                    new ConversationTurn
+                    {
+                        TurnNumber = turnNumber++,
+                        UserRequest = TruncateForContext(entry.UserRequest, 300),
+                        AgentName = entry.AgentName,
+                        AgentResponse = TruncateForContext(entry.AgentResponse, 500),
+                        Timestamp = entry.Timestamp,
+                        // Extract operations from response if they contain specific keywords
+                        OperationsPerformed = ExtractOperationsFromResponse(entry.AgentResponse),
+                    }
+                );
+            }
+
+            return turns;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to load conversation history for {ConversationId}",
+                conversationId
+            );
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Truncate text for context injection while preserving meaning
+    /// </summary>
+    private static string TruncateForContext(string text, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= maxLength)
+            return text;
+
+        // Try to truncate at sentence boundary
+        var truncated = text[..maxLength];
+        var lastSentence = truncated.LastIndexOfAny(['.', '!', '?']);
+        if (lastSentence > maxLength / 2)
+        {
+            return truncated[..(lastSentence + 1)] + "...";
+        }
+
+        return truncated + "...";
+    }
+
+    /// <summary>
+    /// Extract performed operations from agent response text
+    /// </summary>
+    private static List<string> ExtractOperationsFromResponse(string response)
+    {
+        var operations = new List<string>();
+        var lowerResponse = response.ToLowerInvariant();
+
+        // Detect common operations mentioned in responses
+        if (
+            lowerResponse.Contains("subscribed")
+            || lowerResponse.Contains("subscription")
+            || lowerResponse.Contains("subscribe")
+        )
+            operations.Add("subscription");
+
+        if (
+            lowerResponse.Contains("fund-in")
+            || lowerResponse.Contains("funded")
+            || lowerResponse.Contains("deposited")
+        )
+            operations.Add("fund-in");
+
+        if (
+            lowerResponse.Contains("redeemed")
+            || lowerResponse.Contains("redemption")
+            || lowerResponse.Contains("withdraw")
+        )
+            operations.Add("redemption");
+
+        if (
+            lowerResponse.Contains("created portfolio")
+            || lowerResponse.Contains("portfolio created")
+        )
+            operations.Add("portfolio-creation");
+
+        if (lowerResponse.Contains("recommended") || lowerResponse.Contains("recommendation"))
+            operations.Add("recommendation");
+
+        if (lowerResponse.Contains("compliance check") || lowerResponse.Contains("verified"))
+            operations.Add("compliance-check");
+
+        if (lowerResponse.Contains("projection") || lowerResponse.Contains("projected"))
+            operations.Add("projection");
+
+        return operations;
     }
 
     public async Task ClearContextAsync(string conversationId)

@@ -202,6 +202,21 @@ public partial class MasterOrchestrator
                 );
             }
 
+            // Persist conversation turn for multi-turn context awareness
+            var agentName = subAgentsUsed.Count > 0 ? subAgentsUsed.First() : "MasterAgent";
+            _subAgentThreadManager.AddMemory(
+                request.ConversationId,
+                agentName,
+                message,
+                fullResponse.ToString()
+            );
+
+            _logger.LogInformation(
+                "Persisted conversation turn for {ConversationId}: {Agent} handled request",
+                request.ConversationId,
+                agentName
+            );
+
             activity?.SetStatus(ActivityStatusCode.Ok);
             activity?.SetTag("response.length", fullResponse.Length);
             activity?.SetTag("duration_ms", sw.ElapsedMilliseconds);
@@ -273,10 +288,10 @@ public partial class MasterOrchestrator
             ? $"{briefingString}\n\n{intent.IntentSummary}"
             : intent.IntentSummary;
 
-        // Flush any existing events first (shouldn't be any, but just in case)
-        foreach (var evt in DrainDelegationEvents(conversationId))
+        // Clear any stale events from previous requests (shouldn't be any, but just in case)
+        while (DelegationEventMiddleware.TryGetNextEvent(conversationId, out _))
         {
-            yield return CreateChunkFromDelegationEvent(evt);
+            // Just clearing stale events
         }
 
         // Use a flag to track if we've yielded first content
@@ -291,48 +306,29 @@ public partial class MasterOrchestrator
         );
 
         // Stream from the agent - tools execute during this call
+        // NOTE: Delegation events are pushed directly via SignalR for real-time delivery,
+        // so we don't yield them here (that would cause duplicates)
         await foreach (var chunk in _masterAgent.Value.RunStreamingAsync(enrichedMessage, thread))
         {
-            // CRITICAL: Before the FIRST content chunk, ensure all queued events are emitted
-            // The framework executes tools BEFORE yielding content, so events should be queued by now
+            // Drain events from queue to clear them (they were already sent via SignalR)
+            // This prevents memory buildup in the event queue
             if (isFirstContent && chunk.Text != null)
             {
                 isFirstContent = false;
-
-                Console.WriteLine(
-                    $"📨 FIRST CONTENT CHUNK [{DateTime.UtcNow:HH:mm:ss.fff}]: Received first content, draining events now"
-                );
-
-                // Give a tiny moment for any async event queuing to complete
-                await Task.Yield();
-
-                // Drain ALL events before first content
-                var eventCount = 0;
-                foreach (var evt in DrainDelegationEvents(conversationId))
+                // Just clear the queue - events already sent via SignalR
+                while (DelegationEventMiddleware.TryGetNextEvent(conversationId, out _))
                 {
-                    eventCount++;
-                    Console.WriteLine(
-                        $"📤 YIELDING EVENT [{DateTime.UtcNow:HH:mm:ss.fff}]: {evt.Type} - {evt.ToolName ?? evt.SubAgentName}"
-                    );
-                    _logger.LogDebug(
-                        "Emitting delegation event BEFORE first content: {EventType} - {ToolName}",
-                        evt.Type,
-                        evt.ToolName ?? evt.SubAgentName
-                    );
-                    yield return CreateChunkFromDelegationEvent(evt);
+                    // Events already pushed via SignalR, just clearing queue
                 }
-                Console.WriteLine(
-                    $"📊 EVENTS YIELDED [{DateTime.UtcNow:HH:mm:ss.fff}]: {eventCount} events emitted before first content"
-                );
             }
 
-            // Also check for events between content chunks (in case of multi-turn tool calls)
-            foreach (var evt in DrainDelegationEvents(conversationId))
+            // Clear any events that arrived between chunks
+            while (DelegationEventMiddleware.TryGetNextEvent(conversationId, out _))
             {
-                yield return CreateChunkFromDelegationEvent(evt);
+                // Events already pushed via SignalR, just clearing queue
             }
 
-            // Now yield content
+            // Yield content only
             if (chunk.Text != null)
             {
                 yield return new UnifiedStreamingChunk
@@ -343,88 +339,11 @@ public partial class MasterOrchestrator
             }
         }
 
-        // Drain any final events after streaming completes
-        foreach (var evt in DrainDelegationEvents(conversationId))
+        // Clear any final events after streaming completes
+        while (DelegationEventMiddleware.TryGetNextEvent(conversationId, out _))
         {
-            yield return CreateChunkFromDelegationEvent(evt);
+            // Events already pushed via SignalR, just clearing queue
         }
-    }
-
-    /// <summary>
-    /// Drain all pending delegation events from the queue
-    /// </summary>
-    private static IEnumerable<DelegationEvent> DrainDelegationEvents(string conversationId)
-    {
-        while (DelegationEventMiddleware.TryGetNextEvent(conversationId, out var evt))
-        {
-            if (evt != null)
-            {
-                yield return evt;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Convert a delegation event to a streaming chunk
-    /// </summary>
-    private static UnifiedStreamingChunk CreateChunkFromDelegationEvent(DelegationEvent evt)
-    {
-        return evt.Type switch
-        {
-            DelegationEventType.ToolExecutionStart => new UnifiedStreamingChunk
-            {
-                Type = StreamingChunkType.ToolExecution,
-                ToolName = evt.ToolName,
-                Content = $"🔧 Executing: {evt.ToolName}",
-            },
-            DelegationEventType.ToolExecutionComplete => new UnifiedStreamingChunk
-            {
-                Type = StreamingChunkType.ToolExecution,
-                ToolName = evt.ToolName,
-                Content = $"✅ Completed: {evt.ToolName}",
-            },
-            DelegationEventType.ToolExecutionError => new UnifiedStreamingChunk
-            {
-                Type = StreamingChunkType.Error,
-                ToolName = evt.ToolName,
-                Content = $"❌ Error in {evt.ToolName}: {evt.Error}",
-            },
-            DelegationEventType.SubAgentDelegationStart => new UnifiedStreamingChunk
-            {
-                Type = StreamingChunkType.SubAgentDelegation,
-                SubAgentName = evt.SubAgentName,
-                Content = $"🤖 Delegating to: {evt.SubAgentName}",
-            },
-            DelegationEventType.SubAgentDelegationComplete => new UnifiedStreamingChunk
-            {
-                Type = StreamingChunkType.SubAgentComplete,
-                SubAgentName = evt.SubAgentName,
-                Content = $"✅ {evt.SubAgentName} completed",
-            },
-            DelegationEventType.WorkflowStepStart => new UnifiedStreamingChunk
-            {
-                Type = StreamingChunkType.StepStart,
-                StepId = evt.StepId,
-                StepName = evt.StepName,
-                StepNameAr = evt.StepNameAr,
-                StepNumber = evt.StepNumber,
-                TotalSteps = evt.TotalSteps,
-            },
-            DelegationEventType.WorkflowStepComplete => new UnifiedStreamingChunk
-            {
-                Type = StreamingChunkType.StepComplete,
-                StepId = evt.StepId,
-                StepName = evt.StepName,
-                StepNumber = evt.StepNumber,
-                TotalSteps = evt.TotalSteps,
-                StepDurationMs = evt.StepDurationMs,
-            },
-            _ => new UnifiedStreamingChunk
-            {
-                Type = StreamingChunkType.Progress,
-                Content = $"Event: {evt.Type}",
-            },
-        };
     }
 
     /// <summary>

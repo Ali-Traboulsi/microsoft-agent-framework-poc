@@ -98,6 +98,11 @@ public class SubAgentBriefing
     public List<string> PreviousAgentActions { get; set; } = [];
 
     /// <summary>
+    /// Recent conversation history (user requests and agent responses)
+    /// </summary>
+    public List<ConversationTurn> ConversationHistory { get; set; } = [];
+
+    /// <summary>
     /// Relevant entities for this agent
     /// </summary>
     public Dictionary<string, object> RelevantEntities { get; set; } = new();
@@ -137,6 +142,29 @@ public class SubAgentBriefing
         if (!string.IsNullOrEmpty(UserGoal))
             parts.Add($"User's Goal: {UserGoal}");
 
+        // Add conversation history for context awareness
+        if (ConversationHistory.Count > 0)
+        {
+            parts.Add("\n=== CONVERSATION HISTORY ===");
+            parts.Add(
+                "Use this history to understand user references like 'based on the recommendation', 'use that fund', etc."
+            );
+            foreach (var turn in ConversationHistory)
+            {
+                parts.Add($"\n[Turn {turn.TurnNumber}] User asked: {turn.UserRequest}");
+                parts.Add(
+                    $"[Turn {turn.TurnNumber}] {turn.AgentName} responded: {turn.AgentResponse}"
+                );
+                if (turn.OperationsPerformed.Count > 0)
+                {
+                    parts.Add(
+                        $"[Turn {turn.TurnNumber}] Operations performed: {string.Join(", ", turn.OperationsPerformed)}"
+                    );
+                }
+            }
+            parts.Add("=== END HISTORY ===\n");
+        }
+
         if (PreviousAgentActions.Count > 0)
             parts.Add($"Previous Actions:\n- {string.Join("\n- ", PreviousAgentActions)}");
 
@@ -161,4 +189,17 @@ public class SubAgentBriefing
 
         return string.Join("\n", parts);
     }
+}
+
+/// <summary>
+/// Represents a single turn in a conversation
+/// </summary>
+public class ConversationTurn
+{
+    public int TurnNumber { get; set; }
+    public required string UserRequest { get; set; }
+    public required string AgentName { get; set; }
+    public required string AgentResponse { get; set; }
+    public List<string> OperationsPerformed { get; set; } = [];
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }

@@ -192,6 +192,8 @@ public class InMemoryConversationContextStore(ILogger<InMemoryConversationContex
             UserExpertise = context.UserExpertiseLevel,
             Language = context.PreferredLanguage,
             Constraints = context.ActiveConstraints.ToList(),
+            // In-memory store doesn't have conversation history - use DatabaseConversationContextStore for full functionality
+            ConversationHistory = [],
         };
 
         // Add previous agent actions

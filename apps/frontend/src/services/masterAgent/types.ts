@@ -183,9 +183,19 @@ export interface ProjectionMetadata {
 }
 
 
+export interface ToolCallInfo {
+  id: string;
+  name: string;
+  type: 'tool' | 'delegation';
+  status: 'running' | 'completed' | 'error';
+  startTime: Date;
+  endTime?: Date;
+  error?: string;
+}
+
 export interface ChatMessage {
   id: string;
-  type: 'user' | 'agent' | 'thinking' | 'delegation' | 'tool' | 'telemetry' | 'multimodal' | 'transcription' | 'projection' | 'workflow-progress';
+  type: 'user' | 'agent' | 'thinking' | 'delegation' | 'tool' | 'telemetry' | 'multimodal' | 'transcription' | 'projection' | 'workflow-progress' | 'tool-calls';
   content: string;
   timestamp: Date;
   subAgentName?: string;
@@ -194,6 +204,7 @@ export interface ChatMessage {
   files?: UploadedFile[]; // For displaying user's uploaded files
   projectionResult?: ProjectionResult; // For structured projection data
   workflowSteps?: WorkflowStep[]; // For workflow progress tracking
+  toolCalls?: ToolCallInfo[]; // For consolidated tool call display
 }
 
 export interface TelemetryData {

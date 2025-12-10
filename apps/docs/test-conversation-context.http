@@ -1,0 +1,214 @@
+### Conversation Context Awareness Tests
+### Use this file with VS Code REST Client extension
+### IMPORTANT: Keep the same @conversationId for all turns in a test scenario
+
+@baseUrl = http://localhost:5000
+@conversationId = test-context-{{$timestamp}}
+
+###############################################
+# SCENARIO 1: Fund Recommendation → Subscription
+###############################################
+
+### Turn 1: Get fund recommendations
+# @name turn1_recommend
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{conversationId}}",
+  "message": "Recommend mutual funds for a moderate risk investor with $50,000 to invest",
+  "enableThinking": true
+}
+
+### Turn 2: Subscribe based on recommendation (uses context from Turn 1)
+# @name turn2_subscribe
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{conversationId}}",
+  "message": "Based on your recommendation, subscribe me to the best performing one with $20,000",
+  "enableThinking": true
+}
+
+### Turn 3: Check subscription (uses context from Turn 2)
+# @name turn3_check
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{conversationId}}",
+  "message": "Show me the details of the subscription I just made",
+  "enableThinking": true
+}
+
+###############################################
+# SCENARIO 2: Account → Portfolio → Fund-In
+###############################################
+
+@scenario2ConvId = scenario2-{{$timestamp}}
+
+### Turn 1: Get account details
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario2ConvId}}",
+  "message": "Show me the details for account ACC001",
+  "enableThinking": true
+}
+
+### Turn 2: Create portfolio for "this account"
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario2ConvId}}",
+  "message": "Create a growth portfolio for this account with the name 'My Growth Portfolio'",
+  "enableThinking": true
+}
+
+### Turn 3: Fund-in to "the portfolio I just created"
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario2ConvId}}",
+  "message": "Fund in $10,000 to the portfolio I just created",
+  "enableThinking": true
+}
+
+### Turn 4: Check balance of "that portfolio"
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario2ConvId}}",
+  "message": "What's the current balance of that portfolio now?",
+  "enableThinking": true
+}
+
+###############################################
+# SCENARIO 3: Shariah Compliant Investment Chain
+###############################################
+
+@scenario3ConvId = scenario3-{{$timestamp}}
+
+### Turn 1: Initial investment inquiry
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario3ConvId}}",
+  "message": "I have $75,000 to invest. What Shariah-compliant options do you recommend?",
+  "enableThinking": true
+}
+
+### Turn 2: Ask about "the top fund from your list"
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario3ConvId}}",
+  "message": "Tell me more about the top fund from your list",
+  "enableThinking": true
+}
+
+### Turn 3: Subscribe to "that fund" with "half my budget"
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario3ConvId}}",
+  "message": "Subscribe me to that fund with half of my budget",
+  "enableThinking": true
+}
+
+### Turn 4: Projection for "the remaining amount"
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario3ConvId}}",
+  "message": "Project the returns if I invest the remaining amount in a money market fund for 3 years",
+  "enableThinking": true
+}
+
+###############################################
+# SCENARIO 4: Compliance Check Chain
+###############################################
+
+@scenario4ConvId = scenario4-{{$timestamp}}
+
+### Turn 1: Run compliance check
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario4ConvId}}",
+  "message": "Run a compliance check on account ACC002 for a $100,000 investment in high-risk funds",
+  "enableThinking": true
+}
+
+### Turn 2: Ask about compliance results
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario4ConvId}}",
+  "message": "Based on the compliance check, what's the maximum amount I can safely invest?",
+  "enableThinking": true
+}
+
+### Turn 3: Proceed with "that recommended amount"
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario4ConvId}}",
+  "message": "Okay, proceed with investing that recommended amount in the SNB Saudi Equity Fund",
+  "enableThinking": true
+}
+
+###############################################
+# SCENARIO 5: Web Search + Follow-up
+###############################################
+
+@scenario5ConvId = scenario5-{{$timestamp}}
+
+### Turn 1: Web search about market
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario5ConvId}}",
+  "message": "Search the web for current Saudi stock market trends",
+  "enableThinking": true
+}
+
+### Turn 2: Ask about findings
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario5ConvId}}",
+  "message": "Based on what you found, which sectors should I focus on?",
+  "enableThinking": true
+}
+
+### Turn 3: Get recommendations based on sectors
+POST {{baseUrl}}/api/unified/stream
+Content-Type: application/json
+
+{
+  "conversationId": "{{scenario5ConvId}}",
+  "message": "Recommend funds that focus on those sectors",
+  "enableThinking": true
+}
+
+###############################################
+# DEBUG: Check conversation memory
+###############################################
+
+### Get conversation context (if you have this endpoint)
+GET {{baseUrl}}/api/debug/conversation/{{conversationId}}/context

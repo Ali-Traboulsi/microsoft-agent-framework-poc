@@ -5,6 +5,7 @@ import { chatStreamMultiModal, chatStreamWithThread, connect, disconnect, onDele
 import { ChatMessage, TelemetryData } from '../services/masterAgent/types';
 import { ChatThread, getThread, ThreadMessage } from '../services/threads';
 import { ProjectionResultCard } from './Cards/Projections/ProjectionResultCard';
+import { ToolCallCard } from './Cards/ToolCallCard';
 import { WorkflowProgressCard, WorkflowStep } from './Cards/WorkflowProgressCard';
 import { FileUpload, UploadedFile } from './FileUpload';
 import { MessageContent } from './MessageContent';
@@ -176,6 +177,7 @@ export const MasterAgentChat: React.FC = () => {
   }, [isConnected, handleWorkflowProgress]);
 
   // Register for real-time delegation events (tool/sub-agent execution)
+  // Uses a consolidated tool-calls message that updates in place
   useEffect(() => {
     if (!isConnected) {
       return; // Wait for connection
@@ -185,63 +187,81 @@ export const MasterAgentChat: React.FC = () => {
     const unsubscribe = onDelegationEvent((_conversationId: string, event: DelegationEvent) => {
       console.log('🎯 Delegation event received:', event.type, event.subAgentName || event.toolName);
       
+      const name = event.subAgentName || event.toolName || 'Unknown';
+      const isToolType = event.type === 'ToolExecution' || event.type === 'ToolComplete';
+      const isStartEvent = event.type === 'SubAgentDelegation' || event.type === 'ToolExecution';
+      const isCompleteEvent = event.type === 'SubAgentComplete' || event.type === 'ToolComplete';
+      
       // Use flushSync to ensure immediate UI update
       flushSync(() => {
-        const timestamp = new Date();
-        const messageId = `msg-delegation-${Date.now()}-${Math.random()}`;
-        const subAgentName = event.subAgentName ?? undefined;
-        const toolName = event.toolName ?? undefined;
-        
-        // Helper to insert message BEFORE any streaming agent content
-        // This ensures tool/delegation events appear before the AI response
-        const insertBeforeStreamingContent = (newMessage: ChatMessage) => {
-          setMessages(prev => {
-            // Find the last streaming 'agent' message (the one being updated during streaming)
-            // Use reverse loop for compatibility (findLastIndex needs ES2023)
-            let lastAgentIndex = -1;
-            for (let i = prev.length - 1; i >= 0; i--) {
-              if (prev[i].type === 'agent') {
-                lastAgentIndex = i;
-                break;
-              }
+        setMessages(prev => {
+          // Find existing tool-calls message or create position for new one
+          let toolCallsIndex = -1;
+          let lastAgentIndex = -1;
+          
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].type === 'tool-calls' && toolCallsIndex === -1) {
+              toolCallsIndex = i;
             }
+            if (prev[i].type === 'agent' && lastAgentIndex === -1) {
+              lastAgentIndex = i;
+            }
+          }
+          
+          // If this is a start event, add or update tool call
+          if (isStartEvent) {
+            const newToolCall = {
+              id: `tc-${name}-${Date.now()}`,
+              name,
+              type: (isToolType ? 'tool' : 'delegation') as 'tool' | 'delegation',
+              status: 'running' as const,
+              startTime: new Date(),
+            };
             
-            if (lastAgentIndex === -1) {
-              // No agent message yet, just append
+            if (toolCallsIndex >= 0) {
+              // Update existing tool-calls message
+              const updated = [...prev];
+              const existingMessage = { ...updated[toolCallsIndex] };
+              existingMessage.toolCalls = [...(existingMessage.toolCalls || []), newToolCall];
+              updated[toolCallsIndex] = existingMessage;
+              return updated;
+            } else {
+              // Create new tool-calls message
+              const newMessage: ChatMessage = {
+                id: `msg-tool-calls-${Date.now()}`,
+                type: 'tool-calls',
+                content: '',
+                timestamp: new Date(),
+                toolCalls: [newToolCall],
+              };
+              
+              // Insert before agent message if it exists
+              if (lastAgentIndex >= 0) {
+                const result = [...prev];
+                result.splice(lastAgentIndex, 0, newMessage);
+                return result;
+              }
               return [...prev, newMessage];
             }
-            
-            // Insert before the agent message
-            const result = [...prev];
-            result.splice(lastAgentIndex, 0, newMessage);
-            return result;
-          });
-        };
-        
-        const newMessage: ChatMessage = {
-          id: messageId,
-          type: event.type === 'ToolExecution' || event.type === 'ToolComplete' ? 'tool' : 'delegation',
-          content: '',
-          timestamp
-        };
-        
-        if (event.type === 'SubAgentDelegation' && subAgentName) {
-          newMessage.content = `🔄 Delegating to ${subAgentName}...`;
-          newMessage.subAgentName = subAgentName;
-          insertBeforeStreamingContent(newMessage);
-        } else if (event.type === 'SubAgentComplete' && subAgentName) {
-          newMessage.content = `✅ ${subAgentName} completed`;
-          newMessage.subAgentName = subAgentName;
-          insertBeforeStreamingContent(newMessage);
-        } else if (event.type === 'ToolExecution' && toolName) {
-          newMessage.content = `🔧 Executing: ${toolName}`;
-          newMessage.toolName = toolName;
-          insertBeforeStreamingContent(newMessage);
-        } else if (event.type === 'ToolComplete' && toolName) {
-          newMessage.content = `✅ ${toolName} completed`;
-          newMessage.toolName = toolName;
-          insertBeforeStreamingContent(newMessage);
-        }
+          }
+          
+          // If this is a complete event, update existing tool call status
+          if (isCompleteEvent && toolCallsIndex >= 0) {
+            const updated = [...prev];
+            const existingMessage = { ...updated[toolCallsIndex] };
+            existingMessage.toolCalls = (existingMessage.toolCalls || []).map(tc => {
+              // Match by name and running status
+              if (tc.name === name && tc.status === 'running') {
+                return { ...tc, status: 'completed' as const, endTime: new Date() };
+              }
+              return tc;
+            });
+            updated[toolCallsIndex] = existingMessage;
+            return updated;
+          }
+          
+          return prev;
+        });
       });
     });
 
@@ -468,24 +488,18 @@ export const MasterAgentChat: React.FC = () => {
             break;
 
           case 'SubAgentDelegation':
+            // Track delegation for telemetry (UI handled by SignalR handler)
             if (chunk.subAgentName) {
               delegationsUsed.push(chunk.subAgentName);
-              addMessage({
-                type: 'delegation',
-                content: `Delegating to ${chunk.subAgentName}...`,
-                subAgentName: chunk.subAgentName
-              });
+              // Don't add message here - SignalR handler inserts it at correct position
             }
             break;
 
           case 'ToolCall':
+            // Track tool for telemetry (UI handled by SignalR handler)
             if (chunk.toolName) {
               toolsUsed.push(chunk.toolName);
-              addMessage({
-                type: 'tool',
-                content: chunk.content || `Using tool: ${chunk.toolName}`,
-                toolName: chunk.toolName
-              });
+              // Don't add message here - SignalR handler inserts it at correct position
             }
             break;
 
@@ -942,6 +956,10 @@ export const MasterAgentChat: React.FC = () => {
                 ) : msg.type === 'workflow-progress' && msg.workflowSteps ? (
                   <div className="w-full max-w-3xl mx-auto">
                     <WorkflowProgressCard steps={msg.workflowSteps} />
+                  </div>
+                ) : msg.type === 'tool-calls' && msg.toolCalls ? (
+                  <div className="w-full max-w-3xl">
+                    <ToolCallCard toolCalls={msg.toolCalls} />
                   </div>
                 ) : (
                 <div className={`max-w-4xl ${msg.type === 'user' ? 'ml-auto' : 'mr-auto'} ${getMessageBubbleStyle(msg.type, msg.toolName)}`}>
