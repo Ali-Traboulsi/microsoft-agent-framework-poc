@@ -51,6 +51,12 @@ export async function connect(): Promise<signalR.HubConnection> {
   try {
     await connection.start();
     console.log('✅ Master Agent SignalR connected');
+    
+    // Register a global debug handler for workflow progress
+    connection.on('receiveWorkflowProgress', (conversationId: string, event: any) => {
+      console.log('🔔 GLOBAL DEBUG: receiveWorkflowProgress received', { conversationId, event });
+    });
+    
     return connection;
   } catch (error) {
     console.error('❌ Failed to connect to Master Agent hub:', error);
@@ -108,7 +114,12 @@ export function onWorkflowProgress(
   handler: (event: WorkflowProgressEvent) => void
 ): () => void {
   if (!connection) {
-    console.warn('Cannot register workflow progress handler: not connected');
+    console.warn('⚠️ Cannot register workflow progress handler: connection is null');
+    return () => {};
+  }
+
+  if (connection.state !== signalR.HubConnectionState.Connected) {
+    console.warn('⚠️ Cannot register workflow progress handler: connection state is', connection.state);
     return () => {};
   }
 
@@ -120,7 +131,7 @@ export function onWorkflowProgress(
 
   // SignalR JS client uses camelCase for method names
   connection.on('receiveWorkflowProgress', eventHandler);
-  console.log('✅ Registered workflow progress handler');
+  console.log('✅ Registered workflow progress handler on connection state:', connection.state);
 
   return () => {
     if (connection) {

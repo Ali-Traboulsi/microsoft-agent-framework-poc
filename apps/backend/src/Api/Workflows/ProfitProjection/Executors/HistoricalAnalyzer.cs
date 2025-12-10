@@ -61,11 +61,24 @@ public class HistoricalAnalyzer
             // Use provided CIF or default test CIF
             var effectiveCif = cif ?? "100000000001";
 
-            // Fetch available mutual funds from SNB Capital API
-            var fundsResponse = await _snbCapitalApi.GetMutualFundsAsync(effectiveCif);
-            var funds = fundsResponse.Funds ?? new List<SNBMutualFund>();
-
-            _logger.LogInformation("Fetched {Count} funds from SNB Capital API", funds.Count);
+            // Fetch available mutual funds from SNB Capital API with fallback to mock data
+            List<SNBMutualFund> funds;
+            try
+            {
+                var fundsResponse = await _snbCapitalApi.GetMutualFundsAsync(effectiveCif);
+                funds = fundsResponse.Funds ?? new List<SNBMutualFund>();
+                _logger.LogInformation("Fetched {Count} funds from SNB Capital API", funds.Count);
+            }
+            catch (Exception apiEx)
+                when (apiEx is TaskCanceledException or HttpRequestException or TimeoutException)
+            {
+                _logger.LogWarning(
+                    apiEx,
+                    "External API unavailable, falling back to mock fund data"
+                );
+                funds = GetMockFunds();
+                _logger.LogInformation("Using {Count} mock funds as fallback", funds.Count);
+            }
 
             // Log Shariah-compliant fund count for debugging
             var shariahFundCount = funds.Count(f => f.IsShariahCompliant == true);
@@ -299,4 +312,89 @@ public class HistoricalAnalyzer
 
         return stats;
     }
+
+    /// <summary>
+    /// Get mock fund data as fallback when external API is unavailable
+    /// </summary>
+    private static List<SNBMutualFund> GetMockFunds() =>
+        [
+            new SNBMutualFund
+            {
+                FundCode = "SNB-EQ-001",
+                FundName = "SNB Saudi Equity Fund",
+                FundType = "Equity",
+                RiskLevel = "High",
+                NavValue = 15.50m,
+                Currency = "SAR",
+                Return1Y = 12.5m,
+                Return3Y = 8.2m,
+                Return5Y = 9.1m,
+                IsShariahCompliant = true,
+            },
+            new SNBMutualFund
+            {
+                FundCode = "SNB-BAL-001",
+                FundName = "SNB Balanced Fund",
+                FundType = "Balanced",
+                RiskLevel = "Medium",
+                NavValue = 12.25m,
+                Currency = "SAR",
+                Return1Y = 8.3m,
+                Return3Y = 6.5m,
+                Return5Y = 7.2m,
+                IsShariahCompliant = true,
+            },
+            new SNBMutualFund
+            {
+                FundCode = "SNB-FI-001",
+                FundName = "SNB Fixed Income Fund",
+                FundType = "Fixed_Income",
+                RiskLevel = "Low",
+                NavValue = 10.75m,
+                Currency = "SAR",
+                Return1Y = 5.2m,
+                Return3Y = 4.8m,
+                Return5Y = 5.0m,
+                IsShariahCompliant = false,
+            },
+            new SNBMutualFund
+            {
+                FundCode = "SNB-MM-001",
+                FundName = "SNB Money Market Fund",
+                FundType = "Money_Market",
+                RiskLevel = "Low",
+                NavValue = 10.10m,
+                Currency = "SAR",
+                Return1Y = 4.5m,
+                Return3Y = 4.2m,
+                Return5Y = 4.0m,
+                IsShariahCompliant = true,
+            },
+            new SNBMutualFund
+            {
+                FundCode = "SNB-GR-001",
+                FundName = "SNB Growth Fund",
+                FundType = "Equity",
+                RiskLevel = "High",
+                NavValue = 18.90m,
+                Currency = "SAR",
+                Return1Y = 15.8m,
+                Return3Y = 10.5m,
+                Return5Y = 11.2m,
+                IsShariahCompliant = true,
+            },
+            new SNBMutualFund
+            {
+                FundCode = "SNB-DIV-001",
+                FundName = "SNB Dividend Fund",
+                FundType = "Equity",
+                RiskLevel = "Medium",
+                NavValue = 14.20m,
+                Currency = "SAR",
+                Return1Y = 9.8m,
+                Return3Y = 7.5m,
+                Return5Y = 8.0m,
+                IsShariahCompliant = true,
+            },
+        ];
 }

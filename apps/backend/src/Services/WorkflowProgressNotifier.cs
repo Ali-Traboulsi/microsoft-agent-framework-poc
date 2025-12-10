@@ -15,9 +15,9 @@ public class WorkflowProgressNotifier(
 {
     /// <summary>
     /// Push a workflow progress event to a specific conversation
-    /// Uses fire-and-forget pattern to ensure events are sent immediately without blocking
+    /// Properly awaits SignalR send to ensure real-time delivery
     /// </summary>
-    public Task NotifyProgressAsync(
+    public async Task NotifyProgressAsync(
         string conversationId,
         string stepId,
         string stepName,
@@ -51,7 +51,7 @@ public class WorkflowProgressNotifier(
         };
 
         logger.LogInformation(
-            "Pushing workflow progress via SignalR: ConversationId={ConversationId}, Step={StepNumber}/{TotalSteps}, StepId={StepId}, Completed={Completed}",
+            "📤 Pushing workflow progress via SignalR: ConversationId={ConversationId}, Step={StepNumber}/{TotalSteps}, StepId={StepId}, Completed={Completed}",
             conversationId,
             stepNumber,
             totalSteps,
@@ -59,25 +59,31 @@ public class WorkflowProgressNotifier(
             isCompleted
         );
 
-        // Fire-and-forget: Queue the send operation without awaiting
-        // This ensures workflow progress is pushed immediately without blocking the workflow
-        _ = Task.Run(async () =>
+        try
         {
-            try
-            {
-                await hubContext.Clients.All.SendAsync(
-                    "ReceiveWorkflowProgress",
-                    conversationId,
-                    response
-                );
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to push workflow progress via SignalR");
-            }
-        });
+            // Use camelCase method name to match JavaScript SignalR client conventions
+            // Await the send to ensure message is delivered before continuing
+            await hubContext.Clients.All.SendAsync(
+                "receiveWorkflowProgress",
+                conversationId,
+                response
+            );
 
-        return Task.CompletedTask;
+            // Small delay to ensure SignalR message is flushed and delivered
+            // This prevents all messages from being buffered together when steps complete quickly
+            await Task.Delay(50);
+
+            logger.LogInformation(
+                "✅ SignalR workflow progress delivered: Step {StepNumber}/{TotalSteps}, StepId={StepId}",
+                stepNumber,
+                totalSteps,
+                stepId
+            );
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to push workflow progress via SignalR");
+        }
     }
 
     /// <summary>

@@ -57,10 +57,13 @@ public class ProfitProjectionSubAgent : ISubAgent
             instructions: instructions,
             tools:
             [
-                AIFunctionFactory.Create(_projectionTools.CalculateProfitProjectionWithProgress),
+                // Main projection tool with real-time progress streaming
                 AIFunctionFactory.Create(_projectionTools.CalculateProfitProjection),
+                // Personalized projection for existing customers
                 AIFunctionFactory.Create(_projectionTools.CalculatePersonalizedProjection),
+                // Compare lump sum vs SIP strategies
                 AIFunctionFactory.Create(_projectionTools.CompareInvestmentStrategies),
+                // Quick estimate for simple queries
                 AIFunctionFactory.Create(_projectionTools.GetQuickEstimate),
             ]
         );

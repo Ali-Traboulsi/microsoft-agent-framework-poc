@@ -706,22 +706,6 @@ export const MasterAgentChat: React.FC = () => {
             </button>
           </div>
           
-          {!sidebarCollapsed && (
-            <div className="space-y-2">
-              {/* Clear Conversation Button */}
-              {messages.length > 0 && (
-                <button
-                  onClick={handleClearConversation}
-                  disabled={isStreaming}
-                  className="w-full flex items-center gap-2 text-sm bg-red-600 hover:bg-red-700 disabled:bg-slate-700 disabled:opacity-50 p-2 rounded-lg transition-colors"
-                  title="Clear conversation history on server"
-                >
-                  <span>🗑️</span>
-                  <span>Clear History</span>
-                </button>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Connection Status */}

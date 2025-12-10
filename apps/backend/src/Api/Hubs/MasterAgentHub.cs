@@ -85,4 +85,27 @@ public class MasterAgentHub(
         MultiModalChatRequest request,
         CancellationToken cancellationToken = default
     ) => ChatStreamMultiModal(request, cancellationToken);
+
+    /// <summary>
+    /// Test method to verify SignalR workflow progress push works
+    /// Sends a test workflow progress event to all connected clients
+    /// </summary>
+    public async Task TestWorkflowProgress(string conversationId)
+    {
+        var testResponse = new MasterStreamingResponse
+        {
+            Type = "StepStart",
+            Content = "Test workflow step",
+            StepId = "TestStep",
+            StepName = "Testing SignalR Push",
+            StepNameAr = "اختبار الإرسال",
+            StepNumber = 1,
+            TotalSteps = 1,
+            StepCompleted = false,
+            IsComplete = false,
+        };
+
+        // Send to all clients using camelCase method name
+        await Clients.All.SendAsync("receiveWorkflowProgress", conversationId, testResponse);
+    }
 }

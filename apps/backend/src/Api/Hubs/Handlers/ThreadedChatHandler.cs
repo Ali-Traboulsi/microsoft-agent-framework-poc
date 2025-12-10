@@ -40,6 +40,7 @@ public class ThreadedChatHandler(
 
         var actualConversationId = conversationId ?? threadContext.ThreadId.ToString();
         var responseCollector = new ResponseCollector();
+        var messageSaved = false;
 
         var responseStream = GetResponseStream(
             message,
@@ -48,21 +49,47 @@ public class ThreadedChatHandler(
             enableThinking
         );
 
-        await foreach (var response in responseStream.WithCancellation(cancellationToken))
+        try
         {
-            if (cancellationToken.IsCancellationRequested)
-                break;
-
-            responseCollector.Collect(response);
-
-            yield return ChatStreamHandler.MapToStreamingResponse(response);
-
-            if (response.Type == ResponseType.Complete)
+            await foreach (var response in responseStream.WithCancellation(cancellationToken))
             {
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+
+                responseCollector.Collect(response);
+
+                yield return ChatStreamHandler.MapToStreamingResponse(response);
+
+                if (response.Type == ResponseType.Complete)
+                {
+                    await SaveAssistantMessageAsync(
+                        threadContext.ThreadId,
+                        responseCollector,
+                        cancellationToken
+                    );
+                    messageSaved = true;
+                }
+            }
+        }
+        finally
+        {
+            // Ensure assistant message is saved even if stream was interrupted
+            // Only save if we have content and haven't already saved
+            if (!messageSaved && responseCollector.HasContent)
+            {
+                using var scope = scopeFactory.CreateScope();
+                var logger = scope.ServiceProvider.GetRequiredService<
+                    ILogger<ThreadedChatHandler>
+                >();
+                logger.LogWarning(
+                    "Stream ended without Complete response, saving partial message to thread {ThreadId}",
+                    threadContext.ThreadId
+                );
+
                 await SaveAssistantMessageAsync(
                     threadContext.ThreadId,
                     responseCollector,
-                    cancellationToken
+                    CancellationToken.None // Use None since original may be cancelled
                 );
             }
         }
@@ -165,6 +192,14 @@ public class ThreadedChatHandler(
     {
         using var scope = scopeFactory.CreateScope();
         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<ThreadedChatHandler>>();
+
+        logger.LogInformation(
+            "Saving assistant message to thread {ThreadId}: ContentLength={ContentLength}, HasProjection={HasProjection}",
+            threadId,
+            collector.Content.Length,
+            collector.ProjectionResult != null
+        );
 
         var assistantMessage = new ChatMessage
         {
@@ -181,6 +216,12 @@ public class ThreadedChatHandler(
         };
 
         await unitOfWork.Messages.AddAsync(assistantMessage, cancellationToken);
+
+        logger.LogInformation(
+            "Assistant message saved to thread {ThreadId} with ID {MessageId}",
+            threadId,
+            assistantMessage.Id
+        );
     }
 
     private static string GenerateThreadTitle(string content)
@@ -203,6 +244,7 @@ public class ThreadedChatHandler(
         public string? SubAgentName { get; private set; }
         public object? ProjectionResult { get; private set; }
         public string Content => _content.ToString();
+        public bool HasContent => _content.Length > 0 || ProjectionResult != null;
 
         public void Collect(OrchestratorResponse response)
         {
