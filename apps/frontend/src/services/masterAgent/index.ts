@@ -30,11 +30,12 @@ export {
     getConnection,
     getConnectionState,
     isConnected,
+    onDelegationEvent,
     onWorkflowProgress
 } from './connection';
 
 // Re-export types from connection
-export type { WorkflowProgressEvent } from './connection';
+export type { DelegationEvent, WorkflowProgressEvent } from './connection';
 
 // Re-export streaming methods
 export {

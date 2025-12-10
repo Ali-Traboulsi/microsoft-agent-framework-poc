@@ -247,7 +247,8 @@ public partial class MasterOrchestrator
     }
 
     /// <summary>
-    /// Stream response based on the determined execution strategy
+    /// Stream response based on the determined execution strategy.
+    /// Yields delegation events BEFORE content as they occur during tool execution.
     /// </summary>
     private async IAsyncEnumerable<UnifiedStreamingChunk> StreamByStrategyAsync(
         UserIntent intent,
@@ -272,127 +273,158 @@ public partial class MasterOrchestrator
             ? $"{briefingString}\n\n{intent.IntentSummary}"
             : intent.IntentSummary;
 
-        // Buffer to collect content chunks while we wait for delegation events
-        var contentBuffer = new List<string>();
-        var delegationEventsEmitted = new List<UnifiedStreamingChunk>();
-        var hasSeenDelegation = false;
-        var isInThinkingBlock = enableThinking;
+        // Flush any existing events first (shouldn't be any, but just in case)
+        foreach (var evt in DrainDelegationEvents(conversationId))
+        {
+            yield return CreateChunkFromDelegationEvent(evt);
+        }
 
-        // Stream the response - the agent will process tool calls during this
+        // Use a flag to track if we've yielded first content
+        var isFirstContent = true;
+
+        // CRITICAL: Re-set conversation ID right before streaming
+        // This ensures it's set even if there were async context switches
+        DelegationEventMiddleware.CurrentConversationId = conversationId;
+
+        Console.WriteLine(
+            $"🚀 STARTING STREAM [{DateTime.UtcNow:HH:mm:ss.fff}]: Beginning agent streaming for {conversationId}, CurrentConversationId={DelegationEventMiddleware.CurrentConversationId}"
+        );
+
+        // Stream from the agent - tools execute during this call
         await foreach (var chunk in _masterAgent.Value.RunStreamingAsync(enrichedMessage, thread))
         {
-            // FIRST: Check for any delegation events that occurred during tool execution
-            while (
-                DelegationEventMiddleware.TryGetNextEvent(conversationId, out var delegationEvent)
-            )
+            // CRITICAL: Before the FIRST content chunk, ensure all queued events are emitted
+            // The framework executes tools BEFORE yielding content, so events should be queued by now
+            if (isFirstContent && chunk.Text != null)
             {
-                if (delegationEvent == null)
-                    continue;
+                isFirstContent = false;
 
-                hasSeenDelegation = true;
-                isInThinkingBlock = false;
+                Console.WriteLine(
+                    $"📨 FIRST CONTENT CHUNK [{DateTime.UtcNow:HH:mm:ss.fff}]: Received first content, draining events now"
+                );
 
-                // If we have buffered content and this is the first delegation, emit thinking first
-                if (enableThinking && delegationEventsEmitted.Count == 0 && contentBuffer.Count > 0)
+                // Give a tiny moment for any async event queuing to complete
+                await Task.Yield();
+
+                // Drain ALL events before first content
+                var eventCount = 0;
+                foreach (var evt in DrainDelegationEvents(conversationId))
                 {
-                    // Emit buffered content as thinking before delegation
-                    foreach (var bufferedContent in contentBuffer)
-                    {
-                        yield return new UnifiedStreamingChunk
-                        {
-                            Type = StreamingChunkType.Thinking,
-                            Content = bufferedContent,
-                        };
-                    }
-                    contentBuffer.Clear();
+                    eventCount++;
+                    Console.WriteLine(
+                        $"📤 YIELDING EVENT [{DateTime.UtcNow:HH:mm:ss.fff}]: {evt.Type} - {evt.ToolName ?? evt.SubAgentName}"
+                    );
+                    _logger.LogDebug(
+                        "Emitting delegation event BEFORE first content: {EventType} - {ToolName}",
+                        evt.Type,
+                        evt.ToolName ?? evt.SubAgentName
+                    );
+                    yield return CreateChunkFromDelegationEvent(evt);
                 }
-
-                // Emit thinking about delegation
-                if (enableThinking && !string.IsNullOrEmpty(delegationEvent.SubAgentName))
-                {
-                    yield return new UnifiedStreamingChunk
-                    {
-                        Type = StreamingChunkType.Thinking,
-                        Content = $"Delegating to {delegationEvent.SubAgentName}...\n",
-                    };
-                }
-
-                // Emit the delegation event
-                var delegationChunk = ConvertDelegationToUnifiedChunk(delegationEvent);
-                delegationEventsEmitted.Add(delegationChunk);
-                yield return delegationChunk;
+                Console.WriteLine(
+                    $"📊 EVENTS YIELDED [{DateTime.UtcNow:HH:mm:ss.fff}]: {eventCount} events emitted before first content"
+                );
             }
 
-            // THEN: Handle content chunks
+            // Also check for events between content chunks (in case of multi-turn tool calls)
+            foreach (var evt in DrainDelegationEvents(conversationId))
+            {
+                yield return CreateChunkFromDelegationEvent(evt);
+            }
+
+            // Now yield content
             if (chunk.Text != null)
             {
-                // If we haven't seen any delegation yet, buffer the content
-                // (it might be the agent's reasoning before tool calls)
-                if (!hasSeenDelegation && enableThinking)
-                {
-                    contentBuffer.Add(chunk.Text);
-                }
-                else
-                {
-                    // After delegation, emit as content
-                    yield return new UnifiedStreamingChunk
-                    {
-                        Type = StreamingChunkType.Content,
-                        Content = chunk.Text,
-                    };
-                }
-            }
-        }
-
-        // After streaming completes, check for any remaining delegation events
-        while (DelegationEventMiddleware.TryGetNextEvent(conversationId, out var finalEvent))
-        {
-            if (finalEvent == null)
-                continue;
-
-            hasSeenDelegation = true;
-
-            // Emit any remaining buffered content as thinking
-            if (contentBuffer.Count > 0)
-            {
-                foreach (var bufferedContent in contentBuffer)
-                {
-                    yield return new UnifiedStreamingChunk
-                    {
-                        Type = StreamingChunkType.Thinking,
-                        Content = bufferedContent,
-                    };
-                }
-                contentBuffer.Clear();
-            }
-
-            if (enableThinking && !string.IsNullOrEmpty(finalEvent.SubAgentName))
-            {
                 yield return new UnifiedStreamingChunk
                 {
-                    Type = StreamingChunkType.Thinking,
-                    Content = $"Delegating to {finalEvent.SubAgentName}...\n",
-                };
-            }
-
-            yield return ConvertDelegationToUnifiedChunk(finalEvent);
-        }
-
-        // If we still have buffered content and no delegation happened,
-        // it's just regular content (no tool calls were made)
-        if (contentBuffer.Count > 0)
-        {
-            foreach (var bufferedContent in contentBuffer)
-            {
-                yield return new UnifiedStreamingChunk
-                {
-                    Type = hasSeenDelegation
-                        ? StreamingChunkType.Content
-                        : StreamingChunkType.Content,
-                    Content = bufferedContent,
+                    Type = StreamingChunkType.Content,
+                    Content = chunk.Text,
                 };
             }
         }
+
+        // Drain any final events after streaming completes
+        foreach (var evt in DrainDelegationEvents(conversationId))
+        {
+            yield return CreateChunkFromDelegationEvent(evt);
+        }
+    }
+
+    /// <summary>
+    /// Drain all pending delegation events from the queue
+    /// </summary>
+    private static IEnumerable<DelegationEvent> DrainDelegationEvents(string conversationId)
+    {
+        while (DelegationEventMiddleware.TryGetNextEvent(conversationId, out var evt))
+        {
+            if (evt != null)
+            {
+                yield return evt;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Convert a delegation event to a streaming chunk
+    /// </summary>
+    private static UnifiedStreamingChunk CreateChunkFromDelegationEvent(DelegationEvent evt)
+    {
+        return evt.Type switch
+        {
+            DelegationEventType.ToolExecutionStart => new UnifiedStreamingChunk
+            {
+                Type = StreamingChunkType.ToolExecution,
+                ToolName = evt.ToolName,
+                Content = $"🔧 Executing: {evt.ToolName}",
+            },
+            DelegationEventType.ToolExecutionComplete => new UnifiedStreamingChunk
+            {
+                Type = StreamingChunkType.ToolExecution,
+                ToolName = evt.ToolName,
+                Content = $"✅ Completed: {evt.ToolName}",
+            },
+            DelegationEventType.ToolExecutionError => new UnifiedStreamingChunk
+            {
+                Type = StreamingChunkType.Error,
+                ToolName = evt.ToolName,
+                Content = $"❌ Error in {evt.ToolName}: {evt.Error}",
+            },
+            DelegationEventType.SubAgentDelegationStart => new UnifiedStreamingChunk
+            {
+                Type = StreamingChunkType.SubAgentDelegation,
+                SubAgentName = evt.SubAgentName,
+                Content = $"🤖 Delegating to: {evt.SubAgentName}",
+            },
+            DelegationEventType.SubAgentDelegationComplete => new UnifiedStreamingChunk
+            {
+                Type = StreamingChunkType.SubAgentComplete,
+                SubAgentName = evt.SubAgentName,
+                Content = $"✅ {evt.SubAgentName} completed",
+            },
+            DelegationEventType.WorkflowStepStart => new UnifiedStreamingChunk
+            {
+                Type = StreamingChunkType.StepStart,
+                StepId = evt.StepId,
+                StepName = evt.StepName,
+                StepNameAr = evt.StepNameAr,
+                StepNumber = evt.StepNumber,
+                TotalSteps = evt.TotalSteps,
+            },
+            DelegationEventType.WorkflowStepComplete => new UnifiedStreamingChunk
+            {
+                Type = StreamingChunkType.StepComplete,
+                StepId = evt.StepId,
+                StepName = evt.StepName,
+                StepNumber = evt.StepNumber,
+                TotalSteps = evt.TotalSteps,
+                StepDurationMs = evt.StepDurationMs,
+            },
+            _ => new UnifiedStreamingChunk
+            {
+                Type = StreamingChunkType.Progress,
+                Content = $"Event: {evt.Type}",
+            },
+        };
     }
 
     /// <summary>

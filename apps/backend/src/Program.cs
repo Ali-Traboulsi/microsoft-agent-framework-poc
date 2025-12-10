@@ -284,6 +284,12 @@ builder.Services.AddHttpClient<FundInService>(client =>
 // Register Test Token Service (for demo JWT token generation)
 builder.Services.AddSingleton<TestTokenService>();
 
+// Register Delegation Event Notifier (Singleton - pushes events via SignalR)
+builder.Services.AddSingleton<
+    AgentFrameworkQuickStart.Api.Middleware.IDelegationEventNotifier,
+    AgentFrameworkQuickStart.Api.Middleware.DelegationEventNotifier
+>();
+
 // Register SNB Capital API Adapter (Clean Architecture abstraction)
 builder.Services.AddScoped<ISNBCapitalApi, SNBCapitalApiAdapter>();
 
@@ -397,6 +403,14 @@ using (var scope = app.Services.CreateScope())
 // Initialize data store with seed data
 var dataStore = app.Services.GetRequiredService<InvestmentDataStore>();
 dataStore.SeedData();
+
+// Initialize delegation event notifier for real-time SignalR push
+var delegationNotifier =
+    app.Services.GetRequiredService<AgentFrameworkQuickStart.Api.Middleware.IDelegationEventNotifier>();
+AgentFrameworkQuickStart.Api.Middleware.DelegationEventNotifierAccessor.SetInstance(
+    delegationNotifier
+);
+Console.WriteLine("✅ Delegation event notifier initialized for real-time SignalR push");
 
 // Configure HTTP pipeline
 if (app.Environment.IsDevelopment())

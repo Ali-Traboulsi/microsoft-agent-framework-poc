@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { ProjectionResult } from '../interfaces/ProjectionResult.interface';
-import { chatStreamMultiModal, chatStreamWithThread, clearConversation, connect, disconnect, onWorkflowProgress, type MasterStreamResponse, type WorkflowProgressEvent } from '../services/masterAgent';
+import { chatStreamMultiModal, chatStreamWithThread, connect, disconnect, onDelegationEvent, onWorkflowProgress, type DelegationEvent, type MasterStreamResponse, type WorkflowProgressEvent } from '../services/masterAgent';
 import { ChatMessage, TelemetryData } from '../services/masterAgent/types';
 import { ChatThread, getThread, ThreadMessage } from '../services/threads';
 import { ProjectionResultCard } from './Cards/Projections/ProjectionResultCard';
@@ -39,21 +39,42 @@ export const MasterAgentChat: React.FC = () => {
 
   // Track connection state for registering event handlers
   const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   useEffect(() => {
-    connect()
-      .then(() => {
-        setConnectionError(null);
-        setIsConnected(true);
-      })
-      .catch((error) => {
-        console.error('SignalR connection error:', error);
-        setConnectionError(error.message || 'Failed to connect to Master Agent');
-        setIsConnected(false);
-      });
+    let cancelled = false;
+    
+    const establishConnection = async () => {
+      setIsConnecting(true);
+      try {
+        await connect();
+        if (!cancelled) {
+          setConnectionError(null);
+          setIsConnected(true);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('SignalR connection error:', error);
+          const errorMessage = error instanceof Error ? error.message : 'Failed to connect to Master Agent';
+          setConnectionError(errorMessage);
+          setIsConnected(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsConnecting(false);
+        }
+      }
+    };
+    
+    establishConnection();
 
     return () => {
-      disconnect().catch(console.error);
+      cancelled = true;
+      // Don't disconnect immediately - let any pending operations complete
+      // This helps with React StrictMode double-mounting
+      setTimeout(() => {
+        disconnect().catch(console.error);
+      }, 100);
       setIsConnected(false);
     };
   }, []);
@@ -153,6 +174,81 @@ export const MasterAgentChat: React.FC = () => {
       unsubscribe();
     };
   }, [isConnected, handleWorkflowProgress]);
+
+  // Register for real-time delegation events (tool/sub-agent execution)
+  useEffect(() => {
+    if (!isConnected) {
+      return; // Wait for connection
+    }
+
+    console.log('🔗 Registering delegation event handler after connection established');
+    const unsubscribe = onDelegationEvent((_conversationId: string, event: DelegationEvent) => {
+      console.log('🎯 Delegation event received:', event.type, event.subAgentName || event.toolName);
+      
+      // Use flushSync to ensure immediate UI update
+      flushSync(() => {
+        const timestamp = new Date();
+        const messageId = `msg-delegation-${Date.now()}-${Math.random()}`;
+        const subAgentName = event.subAgentName ?? undefined;
+        const toolName = event.toolName ?? undefined;
+        
+        // Helper to insert message BEFORE any streaming agent content
+        // This ensures tool/delegation events appear before the AI response
+        const insertBeforeStreamingContent = (newMessage: ChatMessage) => {
+          setMessages(prev => {
+            // Find the last streaming 'agent' message (the one being updated during streaming)
+            // Use reverse loop for compatibility (findLastIndex needs ES2023)
+            let lastAgentIndex = -1;
+            for (let i = prev.length - 1; i >= 0; i--) {
+              if (prev[i].type === 'agent') {
+                lastAgentIndex = i;
+                break;
+              }
+            }
+            
+            if (lastAgentIndex === -1) {
+              // No agent message yet, just append
+              return [...prev, newMessage];
+            }
+            
+            // Insert before the agent message
+            const result = [...prev];
+            result.splice(lastAgentIndex, 0, newMessage);
+            return result;
+          });
+        };
+        
+        const newMessage: ChatMessage = {
+          id: messageId,
+          type: event.type === 'ToolExecution' || event.type === 'ToolComplete' ? 'tool' : 'delegation',
+          content: '',
+          timestamp
+        };
+        
+        if (event.type === 'SubAgentDelegation' && subAgentName) {
+          newMessage.content = `🔄 Delegating to ${subAgentName}...`;
+          newMessage.subAgentName = subAgentName;
+          insertBeforeStreamingContent(newMessage);
+        } else if (event.type === 'SubAgentComplete' && subAgentName) {
+          newMessage.content = `✅ ${subAgentName} completed`;
+          newMessage.subAgentName = subAgentName;
+          insertBeforeStreamingContent(newMessage);
+        } else if (event.type === 'ToolExecution' && toolName) {
+          newMessage.content = `🔧 Executing: ${toolName}`;
+          newMessage.toolName = toolName;
+          insertBeforeStreamingContent(newMessage);
+        } else if (event.type === 'ToolComplete' && toolName) {
+          newMessage.content = `✅ ${toolName} completed`;
+          newMessage.toolName = toolName;
+          insertBeforeStreamingContent(newMessage);
+        }
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [isConnected]);
 
 
   // Add a new message to the chat
@@ -525,36 +621,24 @@ export const MasterAgentChat: React.FC = () => {
             break;
 
           case 'SubAgentDelegation':
-            // Show delegation
+            // Track delegation for telemetry (UI handled by SignalR handler)
             if (chunk.subAgentName) {
               delegationsUsed.push(chunk.subAgentName);
-              addMessage({
-                type: 'delegation',
-                content: `Delegating to ${chunk.subAgentName}...`,
-                subAgentName: chunk.subAgentName
-              });
+              // Don't add message here - SignalR handler inserts it at correct position
             }
             break;
 
           case 'ToolExecution':
-            // Show tool execution - but skip "completed" messages to avoid duplicates
-            if (chunk.toolName && !chunk.metadata?.hideInUI) {
+            // Track tool for telemetry (UI handled by SignalR handler)
+            if (chunk.toolName) {
               toolsUsed.push(chunk.toolName);
-              addMessage({
-                type: 'tool',
-                content: `Executing: ${chunk.toolName}`,
-                toolName: chunk.toolName
-              });
+              // Don't add message here - SignalR handler inserts it at correct position
             }
             break;
 
           case 'SubAgentComplete':
-            // Sub-agent finished
-            addMessage({
-              type: 'delegation',
-              content: `✅ ${chunk.subAgentName} completed`,
-              subAgentName: chunk.subAgentName!
-            });
+            // Track completion for telemetry (UI handled by SignalR handler)
+            // Don't add message here - SignalR handler handles it
             break;
 
           case 'Content':
@@ -597,33 +681,6 @@ export const MasterAgentChat: React.FC = () => {
       });
     } finally {
       setIsStreaming(false);
-    }
-  };
-
-  const handleClearConversation = async () => {
-    if (!confirm('Clear conversation history? This will start a new conversation.')) {
-      return;
-    }
-
-    try {
-      await clearConversation(conversationId.current);
-      
-      // Generate new conversation ID
-      conversationId.current = `conv-${Date.now()}`;
-      
-      // Clear messages
-      setMessages([]);
-      
-      // Reset telemetry
-      setTelemetry({});
-      
-      console.log('✅ Conversation cleared, new ID:', conversationId.current);
-    } catch (error) {
-      console.error('Failed to clear conversation:', error);
-      addMessage({
-        type: 'agent',
-        content: '❌ Failed to clear conversation history'
-      });
     }
   };
 
@@ -806,6 +863,16 @@ export const MasterAgentChat: React.FC = () => {
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col bg-white dark:bg-gray-900">
+        {/* Connection Status Banner */}
+        {isConnecting && !connectionError && (
+          <div className="bg-blue-50 dark:bg-blue-900/30 border-b border-blue-200 dark:border-blue-800 p-3 animate-pulse">
+            <div className="flex items-center gap-2 max-w-5xl mx-auto">
+              <span className="text-blue-600 dark:text-blue-400 text-xl">🔄</span>
+              <p className="text-blue-800 dark:text-blue-300 font-medium text-sm">Connecting to Master Agent...</p>
+            </div>
+          </div>
+        )}
+        
         {/* Connection Error Banner */}
         {connectionError && (
           <div className="bg-red-50 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800 p-3 animate-slideDown">
@@ -836,7 +903,7 @@ export const MasterAgentChat: React.FC = () => {
                 <div className="inline-block p-6 bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-900/40 dark:to-purple-900/40 rounded-3xl shadow-lg mb-6">
                   <span className="text-6xl">🤖</span>
                 </div>
-                <h2 className="text-3xl font-bold text-gray-800 dark:text-gray-100 mb-3">Welcome to Master Agent</h2>
+                <h2 className="text-3xl font-bold text-gray-800 dark:text-gray-100 mb-3">Welcome SNB Capital to Master Agent</h2>
                 <p className="text-lg text-gray-600 dark:text-gray-300 mb-8">
                   I coordinate multiple specialized AI agents to handle your requests
                 </p>
@@ -859,20 +926,6 @@ export const MasterAgentChat: React.FC = () => {
                   ))}
                 </div>
 
-                <div className="bg-gradient-to-r from-teal-50 to-cyan-50 dark:from-teal-900/40 dark:to-cyan-900/40 border border-teal-200 dark:border-teal-700 rounded-xl p-6 max-w-3xl mx-auto">
-                  <div className="flex items-center gap-3 mb-3">
-                    <span className="text-3xl">🎨</span>
-                    <div className="text-left">
-                      <h3 className="font-bold text-gray-800 dark:text-gray-100">Multi-Modal Support</h3>
-                      <p className="text-sm text-gray-600 dark:text-gray-300">Upload images, audio, and documents</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <div className="bg-white/60 dark:bg-gray-800/60 p-2 rounded text-gray-800 dark:text-gray-200">🖼️ Images</div>
-                    <div className="bg-white/60 dark:bg-gray-800/60 p-2 rounded text-gray-800 dark:text-gray-200">🎵 Audio</div>
-                    <div className="bg-white/60 dark:bg-gray-800/60 p-2 rounded text-gray-800 dark:text-gray-200">📄 Documents</div>
-                  </div>
-                </div>
               </div>
             )}
 

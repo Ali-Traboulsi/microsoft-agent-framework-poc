@@ -15,7 +15,22 @@ public class DelegationEventMiddleware
         ConcurrentQueue<DelegationEvent>
     > EventQueues = new();
 
-    public static string? CurrentConversationId { get; set; }
+    // Use a volatile static field that survives thread context switches
+    // Note: This works for single-user scenarios. For production multi-user,
+    // you would need to extract conversation ID from the agent/thread context.
+    private static volatile string? _activeConversationId;
+
+    public static string? CurrentConversationId
+    {
+        get => _activeConversationId;
+        set
+        {
+            _activeConversationId = value;
+            Console.WriteLine(
+                $"🔧 SET ConversationId [{DateTime.UtcNow:HH:mm:ss.fff}]: {value ?? "null"}"
+            );
+        }
+    }
 
     /// <summary>
     /// Function invocation middleware that tracks delegations
@@ -29,6 +44,10 @@ public class DelegationEventMiddleware
     {
         var functionName = context.Function.Name;
         var conversationId = CurrentConversationId ?? "unknown";
+
+        Console.WriteLine(
+            $"🎯 MIDDLEWARE CALLED [{DateTime.UtcNow:HH:mm:ss.fff}]: Function={functionName}, CurrentConversationId={CurrentConversationId ?? "NULL"}, Using={conversationId}"
+        );
 
         // Check if this is a delegation function
         if (functionName == "DelegateToSubAgent" || functionName == "DelegateToMultipleSubAgents")
@@ -157,15 +176,46 @@ public class DelegationEventMiddleware
     }
 
     /// <summary>
-    /// Emit an event to the queue
+    /// Emit an event - pushes directly via SignalR for real-time delivery
+    /// Also queues for backward compatibility with code that polls
     /// </summary>
     private static void EmitEvent(string conversationId, DelegationEvent delegationEvent)
     {
+        // Log when event is being queued for debugging
+        Console.WriteLine(
+            $"📝 QUEUE EVENT [{DateTime.UtcNow:HH:mm:ss.fff}]: {delegationEvent.Type} - {delegationEvent.ToolName ?? delegationEvent.SubAgentName} for {conversationId}"
+        );
+
+        // Queue for backward compatibility
         var queue = EventQueues.GetOrAdd(
             conversationId,
             _ => new ConcurrentQueue<DelegationEvent>()
         );
         queue.Enqueue(delegationEvent);
+
+        Console.WriteLine(
+            $"📝 QUEUE SIZE [{DateTime.UtcNow:HH:mm:ss.fff}]: {queue.Count} events for {conversationId}"
+        );
+
+        // Push directly via SignalR for real-time delivery
+        var notifier = DelegationEventNotifierAccessor.Instance;
+        if (notifier != null)
+        {
+            // Fire and forget - don't block the middleware
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await notifier.NotifyAsync(conversationId, delegationEvent);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(
+                        $"⚠️ Failed to push delegation event via SignalR: {ex.Message}"
+                    );
+                }
+            });
+        }
     }
 
     /// <summary>
@@ -228,10 +278,28 @@ public class DelegationEventMiddleware
     /// </summary>
     public static bool TryGetNextEvent(string conversationId, out DelegationEvent? delegationEvent)
     {
-        if (EventQueues.TryGetValue(conversationId, out var queue) && queue.TryDequeue(out var evt))
+        if (EventQueues.TryGetValue(conversationId, out var queue))
         {
-            delegationEvent = evt;
-            return true;
+            Console.WriteLine(
+                $"🔍 TRY DEQUEUE [{DateTime.UtcNow:HH:mm:ss.fff}]: Queue exists for {conversationId}, size={queue.Count}"
+            );
+            if (queue.TryDequeue(out var evt))
+            {
+                Console.WriteLine(
+                    $"✅ DEQUEUED [{DateTime.UtcNow:HH:mm:ss.fff}]: {evt.Type} - {evt.ToolName ?? evt.SubAgentName}"
+                );
+                delegationEvent = evt;
+                return true;
+            }
+            Console.WriteLine(
+                $"⚠️ QUEUE EMPTY [{DateTime.UtcNow:HH:mm:ss.fff}]: No events to dequeue"
+            );
+        }
+        else
+        {
+            Console.WriteLine(
+                $"⚠️ NO QUEUE [{DateTime.UtcNow:HH:mm:ss.fff}]: No queue found for {conversationId}"
+            );
         }
 
         delegationEvent = null;
