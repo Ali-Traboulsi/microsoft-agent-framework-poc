@@ -194,6 +194,9 @@ public enum StreamingChunkType
     /// <summary>Thinking/reasoning about the request</summary>
     Thinking,
 
+    /// <summary>Chain-of-thought reasoning step</summary>
+    Reasoning,
+
     /// <summary>Regular content being streamed</summary>
     Content,
 

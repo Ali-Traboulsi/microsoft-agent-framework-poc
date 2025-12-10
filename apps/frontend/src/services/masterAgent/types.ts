@@ -195,7 +195,7 @@ export interface ToolCallInfo {
 
 export interface ChatMessage {
   id: string;
-  type: 'user' | 'agent' | 'thinking' | 'delegation' | 'tool' | 'telemetry' | 'multimodal' | 'transcription' | 'projection' | 'workflow-progress' | 'tool-calls';
+  type: 'user' | 'agent' | 'thinking' | 'reasoning' | 'delegation' | 'tool' | 'telemetry' | 'multimodal' | 'transcription' | 'projection' | 'workflow-progress' | 'tool-calls';
   content: string;
   timestamp: Date;
   subAgentName?: string;

@@ -4,6 +4,7 @@ using System.Text;
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.Middleware;
 using AgentFrameworkQuickStart.Core.Domain.Intelligence;
+using AgentFrameworkQuickStart.Core.Domain.Reasoning;
 using Microsoft.Extensions.AI;
 
 namespace AgentFrameworkQuickStart.Api.Orchestration;
@@ -148,6 +149,61 @@ public partial class MasterOrchestrator
                                 : ""
                         ),
                 };
+            }
+
+            // Chain-of-Thought Reasoning (for complex or low-confidence cases)
+            ThoughtChain? thoughtChain = null;
+            if (
+                request.EnableThinking
+                && (classifiedIntent.Confidence < 0.9 || classifiedIntent.IsComposite)
+            )
+            {
+                thoughtChain = await _reasoningEngine.ReasonAsync(
+                    message,
+                    classifiedIntent,
+                    context,
+                    effectiveCancellation
+                );
+
+                // Stream reasoning steps
+                foreach (var step in thoughtChain.Steps.Take(4)) // Limit to avoid verbosity
+                {
+                    var emoji = step.Type switch
+                    {
+                        ReasoningStepType.Observation => "👀",
+                        ReasoningStepType.Analysis => "🔍",
+                        ReasoningStepType.EntityExtraction => "📋",
+                        ReasoningStepType.DelegationReasoning => "🤝",
+                        ReasoningStepType.Conclusion => "🎯",
+                        _ => "•",
+                    };
+
+                    yield return new UnifiedStreamingChunk
+                    {
+                        Type = StreamingChunkType.Reasoning,
+                        Content = $"{emoji} {step.Thought}\n",
+                        Metadata = new Dictionary<string, object>
+                        {
+                            ["stepType"] = step.Type.ToString(),
+                            ["stepNumber"] = step.StepNumber,
+                            ["confidence"] = step.Confidence,
+                        },
+                    };
+                }
+
+                // If reasoning suggests confirmation is needed
+                if (thoughtChain.FinalDecision?.RequiresConfirmation == true)
+                {
+                    yield return new UnifiedStreamingChunk
+                    {
+                        Type = StreamingChunkType.Reasoning,
+                        Content = $"⚠️ {thoughtChain.FinalDecision.ConfirmationReason}\n",
+                        Metadata = new Dictionary<string, object>
+                        {
+                            ["requiresConfirmation"] = true,
+                        },
+                    };
+                }
             }
 
             // Update context with extracted entities

@@ -1,5 +1,5 @@
 import React from 'react';
-import { MasterAgentChat } from './components/MasterAgentChat';
+import { MasterAgentChat } from './components/MasterAgentChat/index';
 import './index.css';
 
 const App: React.FC = () => {

@@ -51,6 +51,7 @@ public partial class MasterOrchestrator : IMasterOrchestrator
     private readonly IIntentClassifier _intentClassifier;
     private readonly IConversationContextStore _contextStore;
     private readonly FastIntentMatcher _fastIntentMatcher;
+    private readonly ReasoningEngine _reasoningEngine;
 
     // Metrics for intelligence layer
     private static readonly Counter<long> IntentClassificationCounter = Meter.CreateCounter<long>(
@@ -75,7 +76,8 @@ public partial class MasterOrchestrator : IMasterOrchestrator
         ProjectionTools projectionTools,
         IIntentClassifier intentClassifier,
         IConversationContextStore contextStore,
-        FastIntentMatcher fastIntentMatcher
+        FastIntentMatcher fastIntentMatcher,
+        ReasoningEngine reasoningEngine
     )
     {
         _chatClient = chatClient;
@@ -89,6 +91,7 @@ public partial class MasterOrchestrator : IMasterOrchestrator
         _intentClassifier = intentClassifier;
         _contextStore = contextStore;
         _fastIntentMatcher = fastIntentMatcher;
+        _reasoningEngine = reasoningEngine;
         _subAgentLookup = subAgents.ToDictionary(sa => sa.Name, sa => sa);
         _masterAgent = new Lazy<AIAgent>(CreateMasterAgentWithMiddleware);
     }
