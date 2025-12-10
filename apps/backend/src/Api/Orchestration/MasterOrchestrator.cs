@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.Middleware;
+using AgentFrameworkQuickStart.Core.Domain.Intelligence;
+using AgentFrameworkQuickStart.Core.Interfaces;
 using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Tools;
 using Microsoft.Agents.AI;
@@ -11,13 +13,6 @@ namespace AgentFrameworkQuickStart.Api.Orchestration;
 
 /// <summary>
 /// Master orchestrator that coordinates multiple specialized sub-agents.
-/// Split into partial classes for maintainability:
-/// - MasterOrchestrator.cs (this file) - Core class, fields, constructor, agent creation
-/// - MasterOrchestrator.Delegation.cs - Sub-agent delegation methods
-/// - MasterOrchestrator.Processing.cs - Request processing methods
-/// - MasterOrchestrator.Streaming.cs - Streaming response methods
-/// - MasterOrchestrator.MultiModal.cs - Multi-modal request processing
-/// - MasterOrchestrator.Helpers.cs - Helper methods and utilities
 /// </summary>
 public partial class MasterOrchestrator : IMasterOrchestrator
 {
@@ -48,9 +43,24 @@ public partial class MasterOrchestrator : IMasterOrchestrator
     private readonly Lazy<AIAgent> _masterAgent;
     private readonly Dictionary<string, ISubAgent> _subAgentLookup;
     private readonly WebSearchTools _webSearchTools;
-    private readonly StructuredResponseHandler _structuredResponseHandler;
     private readonly AgentThreadManager _threadManager;
     private readonly ProjectionTools _projectionTools;
+
+    // Intelligence Layer (P0)
+    private readonly IIntentClassifier _intentClassifier;
+    private readonly IConversationContextStore _contextStore;
+
+    // Metrics for intelligence layer
+    private static readonly Counter<long> IntentClassificationCounter = Meter.CreateCounter<long>(
+        "orchestrator.intent_classifications",
+        description: "Number of intent classifications performed"
+    );
+    private static readonly Histogram<double> IntentClassificationDuration =
+        Meter.CreateHistogram<double>(
+            "orchestrator.intent_classification.duration",
+            unit: "ms",
+            description: "Duration of intent classification"
+        );
 
     public MasterOrchestrator(
         IChatClient chatClient,
@@ -58,9 +68,10 @@ public partial class MasterOrchestrator : IMasterOrchestrator
         WebSearchTools webSearchTools,
         ILogger<MasterOrchestrator> logger,
         ILoggerFactory loggerFactory,
-        StructuredResponseHandler structuredResponseHandler,
         AgentThreadManager threadManager,
-        ProjectionTools projectionTools
+        ProjectionTools projectionTools,
+        IIntentClassifier intentClassifier,
+        IConversationContextStore contextStore
     )
     {
         _chatClient = chatClient;
@@ -68,9 +79,10 @@ public partial class MasterOrchestrator : IMasterOrchestrator
         _webSearchTools = webSearchTools;
         _logger = logger;
         _loggerFactory = loggerFactory;
-        _structuredResponseHandler = structuredResponseHandler;
         _threadManager = threadManager;
         _projectionTools = projectionTools;
+        _intentClassifier = intentClassifier;
+        _contextStore = contextStore;
         _subAgentLookup = subAgents.ToDictionary(sa => sa.Name, sa => sa);
         _masterAgent = new Lazy<AIAgent>(CreateMasterAgentWithMiddleware);
     }

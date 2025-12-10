@@ -43,11 +43,17 @@ public class MasterAgentController : ControllerBase
             _logger.LogInformation("Master agent chat request: {Message}", request.Message);
 
             var conversationId = request.ConversationId ?? Guid.NewGuid().ToString();
-            var result = await _orchestrator.ProcessRequestAsync(
-                request.Message,
-                conversationId,
-                request.EnableThinking
-            );
+
+            // Build unified request
+            var unifiedRequest = new UnifiedChatRequest
+            {
+                ConversationId = conversationId,
+                Message = request.Message,
+                EnableThinking = request.EnableThinking,
+            };
+
+            // Collect streaming response
+            var result = await CollectStreamingResponseAsync(unifiedRequest);
 
             return Ok(
                 new ApiResponse<OrchestratorResultDto>(
@@ -72,44 +78,45 @@ public class MasterAgentController : ControllerBase
         }
     }
 
-    [HttpPost("chat/structured")]
-    public async Task<ActionResult<ApiResponse<StructuredOrchestratorResultDto>>> ChatStructured(
-        [FromBody] MasterChatRequest request
+    /// <summary>
+    /// Collects streaming response into a unified response
+    /// </summary>
+    private async Task<UnifiedChatResponse> CollectStreamingResponseAsync(
+        UnifiedChatRequest request
     )
     {
-        try
-        {
-            _logger.LogInformation(
-                "Master agent structured chat request: {Message}",
-                request.Message
-            );
+        UnifiedChatResponse? finalResult = null;
+        var contentBuilder = new System.Text.StringBuilder();
+        var subAgentsUsed = new List<string>();
 
-            var conversationId = request.ConversationId ?? Guid.NewGuid().ToString();
-            var result = await _orchestrator.ProcessRequestStructuredAsync(
-                request.Message,
-                conversationId
-            );
-
-            return Ok(
-                new ApiResponse<StructuredOrchestratorResultDto>(
-                    Success: true,
-                    Data: new StructuredOrchestratorResultDto
-                    {
-                        Success = result.Success,
-                        StructuredResponse = result.StructuredResponse,
-                        SubAgentsUsed = result.SubAgentsUsed,
-                        DurationMs = result.TotalDurationMs,
-                        ErrorMessage = result.ErrorMessage,
-                    },
-                    Error: null
-                )
-            );
-        }
-        catch (Exception ex)
+        await foreach (var chunk in _orchestrator.ProcessAsync(request))
         {
-            _logger.LogError(ex, "Error in master agent structured chat");
-            return Ok(new ApiResponse<StructuredOrchestratorResultDto>(false, null, ex.Message));
+            if (chunk.Type == StreamingChunkType.Content && !string.IsNullOrEmpty(chunk.Content))
+            {
+                contentBuilder.Append(chunk.Content);
+            }
+
+            if (
+                !string.IsNullOrEmpty(chunk.SubAgentName)
+                && !subAgentsUsed.Contains(chunk.SubAgentName)
+            )
+            {
+                subAgentsUsed.Add(chunk.SubAgentName);
+            }
+
+            if (chunk.Type == StreamingChunkType.Complete && chunk.FinalResult != null)
+            {
+                finalResult = chunk.FinalResult;
+            }
         }
+
+        return finalResult
+            ?? new UnifiedChatResponse
+            {
+                Success = true,
+                Response = contentBuilder.ToString(),
+                SubAgentsUsed = subAgentsUsed,
+            };
     }
 
     /// <summary>
@@ -237,12 +244,15 @@ public class MasterAgentController : ControllerBase
 
             var conversationId = request.ConversationId ?? Guid.NewGuid().ToString();
 
-            // First, use the Master Agent to understand and delegate
-            var agentResult = await _orchestrator.ProcessRequestAsync(
-                $"[PROJECTION REQUEST] {request.Message}",
-                conversationId,
-                request.EnableThinking
-            );
+            // Use unified streaming and collect result
+            var unifiedRequest = new UnifiedChatRequest
+            {
+                ConversationId = conversationId,
+                Message = $"[PROJECTION REQUEST] {request.Message}",
+                EnableThinking = request.EnableThinking,
+            };
+
+            var agentResult = await CollectStreamingResponseAsync(unifiedRequest);
 
             var processingTime = (DateTime.UtcNow - startTime).TotalMilliseconds;
 
@@ -346,12 +356,16 @@ public class MasterAgentController : ControllerBase
 
             var conversationId = request.ConversationId ?? Guid.NewGuid().ToString();
 
-            // Process through orchestrator
-            var result = await _orchestrator.ProcessMultiModalRequestAsync(
-                aiContents,
-                conversationId,
-                request.EnableThinking
-            );
+            // Process through orchestrator using unified streaming
+            var unifiedRequest = new UnifiedChatRequest
+            {
+                ConversationId = conversationId,
+                Message = request.Message,
+                Contents = aiContents,
+                EnableThinking = request.EnableThinking,
+            };
+
+            var result = await CollectStreamingResponseAsync(unifiedRequest);
 
             var processingTime = (DateTime.UtcNow - startTime).TotalMilliseconds;
 
@@ -447,12 +461,16 @@ public class MasterAgentController : ControllerBase
 
             var conversationId = request.ConversationId ?? Guid.NewGuid().ToString();
 
-            // Process through orchestrator
-            var result = await _orchestrator.ProcessMultiModalRequestAsync(
-                aiContents,
-                conversationId,
-                request.EnableThinking
-            );
+            // Process through orchestrator using unified streaming
+            var unifiedRequest = new UnifiedChatRequest
+            {
+                ConversationId = conversationId,
+                Message = request.Message,
+                Contents = aiContents,
+                EnableThinking = request.EnableThinking,
+            };
+
+            var result = await CollectStreamingResponseAsync(unifiedRequest);
 
             var processingTime = (DateTime.UtcNow - startTime).TotalMilliseconds;
 

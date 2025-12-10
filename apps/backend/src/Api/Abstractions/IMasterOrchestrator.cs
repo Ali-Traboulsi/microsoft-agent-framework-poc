@@ -4,93 +4,33 @@ using AgentFrameworkQuickStart.Api.DTOs;
 using AgentFrameworkQuickStart.Api.Workflows.ProfitProjection.Messages;
 
 /// <summary>
-/// Orchestrates multiple sub-agents and coordinates their activities
+/// Orchestrates multiple sub-agents and coordinates their activities.
+/// All processing uses intelligent streaming pipeline by default.
+///
+/// STREAMING ONLY: This orchestrator uses streaming for all responses.
+/// The intelligent pipeline determines how to process based on content and intent.
 /// </summary>
 public interface IMasterOrchestrator
 {
-    /// <summary>
-    /// Process a user request by analyzing intent and delegating to appropriate sub-agents
-    /// </summary>
-    /// <param name="userMessage">The user's request</param>
-    /// <param name="conversationId">Unique identifier for this conversation</param>
-    /// <param name="enableThinking">Enable extended reasoning mode (like ChatGPT o1)</param>
-    /// <returns>The orchestrated response</returns>
-    Task<OrchestratorResult> ProcessRequestAsync(
-        string userMessage,
-        string conversationId,
-        bool enableThinking = false
-    );
+    // ========== UNIFIED STREAMING API (Primary - Use This) ==========
 
     /// <summary>
-    /// Process a user request with streaming response
+    /// Process any request with streaming response.
+    /// This is THE primary entry point - handles text, multi-modal, everything.
+    /// The model determines output format based on request content and user intent.
     /// </summary>
-    /// <param name="userMessage">The user's request</param>
-    /// <param name="conversationId">Unique identifier for this conversation</param>
-    /// <param name="enableThinking">Enable extended reasoning mode (like ChatGPT o1)</param>
-    /// <returns>Stream of orchestrator responses</returns>
-    IAsyncEnumerable<OrchestratorResponse> ProcessRequestStreamingAsync(
-        string userMessage,
-        string conversationId,
-        bool enableThinking = false
+    /// <param name="request">Unified request containing all input types</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Stream of response chunks</returns>
+    IAsyncEnumerable<UnifiedStreamingChunk> ProcessAsync(
+        UnifiedChatRequest request,
+        CancellationToken cancellationToken = default
     );
 
     /// <summary>
     /// Get information about available sub-agents
     /// </summary>
-    /// <returns>List of sub-agent descriptions</returns>
     List<SubAgentInfo> GetAvailableSubAgents();
-
-    /// <summary>
-    /// Process a user request and return structured JSON response
-    /// </summary>
-    /// <param name="userMessage">The user's request</param>
-    /// <param name="conversationId">Unique identifier for this conversation</param>
-    /// <returns>Structured JSON response conforming to StructuredAgentResponse schema</returns>
-    Task<StructuredOrchestratorResult> ProcessRequestStructuredAsync(
-        string userMessage,
-        string conversationId
-    );
-
-    /// <summary>
-    /// Process a multi-modal request (text, images, audio, files)
-    /// </summary>
-    /// <param name="contents">List of AIContent items (text, images, audio, URIs)</param>
-    /// <param name="conversationId">Unique identifier for this conversation</param>
-    /// <param name="enableThinking">Enable extended reasoning mode (like ChatGPT o1)</param>
-    /// <returns>The orchestrated response</returns>
-    Task<OrchestratorResult> ProcessMultiModalRequestAsync(
-        List<Microsoft.Extensions.AI.AIContent> contents,
-        string conversationId,
-        bool enableThinking = false
-    );
-
-    /// <summary>
-    /// Process a multi-modal request with streaming response
-    /// </summary>
-    /// <param name="contents">List of AIContent items (text, images, audio, URIs)</param>
-    /// <param name="conversationId">Unique identifier for this conversation</param>
-    /// <param name="enableThinking">Enable extended reasoning mode (like ChatGPT o1)</param>
-    /// <returns>Stream of orchestrator responses</returns>
-    IAsyncEnumerable<OrchestratorResponse> ProcessMultiModalRequestStreamingAsync(
-        List<Microsoft.Extensions.AI.AIContent> contents,
-        string conversationId,
-        bool enableThinking = false
-    );
-
-    /// <summary>
-    /// Process a user request with streaming response, including prior conversation history
-    /// </summary>
-    /// <param name="userMessage">The user's request</param>
-    /// <param name="conversationId">Unique identifier for this conversation</param>
-    /// <param name="priorMessages">Prior conversation messages to restore context</param>
-    /// <param name="enableThinking">Enable extended reasoning mode</param>
-    /// <returns>Stream of orchestrator responses</returns>
-    IAsyncEnumerable<OrchestratorResponse> ProcessRequestStreamingWithHistoryAsync(
-        string userMessage,
-        string conversationId,
-        IEnumerable<ConversationMessage> priorMessages,
-        bool enableThinking = false
-    );
 }
 
 /// <summary>

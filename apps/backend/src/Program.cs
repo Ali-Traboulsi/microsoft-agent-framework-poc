@@ -14,6 +14,7 @@ using AgentFrameworkQuickStart.Infrastructure.ExternalApis;
 using AgentFrameworkQuickStart.Infrastructure.Persistence;
 using AgentFrameworkQuickStart.Services;
 using AgentFrameworkQuickStart.Services.FundIn;
+using AgentFrameworkQuickStart.Services.Intelligence;
 using AgentFrameworkQuickStart.Tools;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Microsoft.EntityFrameworkCore;
@@ -328,6 +329,14 @@ builder.Services.AddScoped<ISubAgent, ExternalApiSubAgent>();
 
 // Register helper classes for orchestration
 builder.Services.AddScoped<StructuredResponseHandler>();
+
+// ===== Intelligence Layer (P0) =====
+// All chat requests use intelligent processing by default:
+// - Intent Classification: Semantic understanding of user requests
+// - Context Store: Persistent conversation context and entity tracking
+builder.Services.AddScoped<IIntentClassifier, IntentClassifier>();
+builder.Services.AddScoped<IConversationContextStore, DatabaseConversationContextStore>();
+Console.WriteLine("🧠 Intelligence Layer enabled: Intent Classification + Database Context Store");
 
 // Register SignalR Hub Handlers
 builder.Services.AddScoped<IChatHandler, ChatStreamHandler>();

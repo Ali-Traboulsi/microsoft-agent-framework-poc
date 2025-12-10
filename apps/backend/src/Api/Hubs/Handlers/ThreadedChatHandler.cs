@@ -46,21 +46,22 @@ public class ThreadedChatHandler(
             message,
             actualConversationId,
             threadContext.PriorMessages,
-            enableThinking
+            enableThinking,
+            cancellationToken
         );
 
         try
         {
-            await foreach (var response in responseStream.WithCancellation(cancellationToken))
+            await foreach (var chunk in responseStream.WithCancellation(cancellationToken))
             {
                 if (cancellationToken.IsCancellationRequested)
                     break;
 
-                responseCollector.Collect(response);
+                responseCollector.Collect(chunk);
 
-                yield return ChatStreamHandler.MapToStreamingResponse(response);
+                yield return ChatStreamHandler.MapChunkToStreamingResponse(chunk);
 
-                if (response.Type == ResponseType.Complete)
+                if (chunk.Type == StreamingChunkType.Complete)
                 {
                     await SaveAssistantMessageAsync(
                         threadContext.ThreadId,
@@ -167,21 +168,24 @@ public class ThreadedChatHandler(
             .ToList();
     }
 
-    private IAsyncEnumerable<OrchestratorResponse> GetResponseStream(
+    private IAsyncEnumerable<UnifiedStreamingChunk> GetResponseStream(
         string message,
         string conversationId,
         List<ConversationMessage> priorMessages,
-        bool enableThinking
+        bool enableThinking,
+        CancellationToken cancellationToken
     )
     {
-        return priorMessages.Count > 0
-            ? orchestrator.ProcessRequestStreamingWithHistoryAsync(
-                message,
-                conversationId,
-                priorMessages,
-                enableThinking
-            )
-            : orchestrator.ProcessRequestStreamingAsync(message, conversationId, enableThinking);
+        var request = new UnifiedChatRequest
+        {
+            ConversationId = conversationId,
+            Message = message,
+            PriorMessages = priorMessages.Count > 0 ? priorMessages : null,
+            EnableThinking = enableThinking,
+            CancellationToken = cancellationToken,
+        };
+
+        return orchestrator.ProcessAsync(request, cancellationToken);
     }
 
     private async Task SaveAssistantMessageAsync(
@@ -246,21 +250,24 @@ public class ThreadedChatHandler(
         public string Content => _content.ToString();
         public bool HasContent => _content.Length > 0 || ProjectionResult != null;
 
-        public void Collect(OrchestratorResponse response)
+        public void Collect(UnifiedStreamingChunk chunk)
         {
             if (
-                !string.IsNullOrEmpty(response.Content)
-                && (response.Type == ResponseType.Content || response.Type == ResponseType.Progress)
+                !string.IsNullOrEmpty(chunk.Content)
+                && (
+                    chunk.Type == StreamingChunkType.Content
+                    || chunk.Type == StreamingChunkType.Progress
+                )
             )
             {
-                _content.Append(response.Content);
+                _content.Append(chunk.Content);
             }
 
-            if (!string.IsNullOrEmpty(response.SubAgentName))
-                SubAgentName = response.SubAgentName;
+            if (!string.IsNullOrEmpty(chunk.SubAgentName))
+                SubAgentName = chunk.SubAgentName;
 
-            if (response.ProjectionResult != null)
-                ProjectionResult = response.ProjectionResult;
+            if (chunk.FinalResult?.ProjectionResult != null)
+                ProjectionResult = chunk.FinalResult.ProjectionResult;
         }
     }
 }

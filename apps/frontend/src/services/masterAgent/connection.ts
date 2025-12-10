@@ -113,14 +113,21 @@ export interface WorkflowProgressEvent {
 export function onWorkflowProgress(
   handler: (event: WorkflowProgressEvent) => void
 ): () => void {
-  if (!connection) {
+  // Safely check connection - avoid null reference errors
+  const currentConnection = connection;
+  
+  if (!currentConnection) {
     console.warn('⚠️ Cannot register workflow progress handler: connection is null');
-    return () => {};
+    return () => {
+      // Return safe no-op cleanup
+    };
   }
 
-  if (connection.state !== signalR.HubConnectionState.Connected) {
-    console.warn('⚠️ Cannot register workflow progress handler: connection state is', connection.state);
-    return () => {};
+  if (currentConnection.state !== signalR.HubConnectionState.Connected) {
+    console.warn('⚠️ Cannot register workflow progress handler: connection state is', currentConnection.state);
+    return () => {
+      // Return safe no-op cleanup
+    };
   }
 
   const eventHandler = (eventConversationId: string, event: WorkflowProgressEvent) => {
@@ -130,13 +137,22 @@ export function onWorkflowProgress(
   };
 
   // SignalR JS client uses camelCase for method names
-  connection.on('receiveWorkflowProgress', eventHandler);
-  console.log('✅ Registered workflow progress handler on connection state:', connection.state);
+  try {
+    currentConnection.on('receiveWorkflowProgress', eventHandler);
+    console.log('✅ Registered workflow progress handler on connection state:', currentConnection.state);
+  } catch (error) {
+    console.error('❌ Failed to register workflow progress handler:', error);
+    return () => {};
+  }
 
   return () => {
-    if (connection) {
-      connection.off('receiveWorkflowProgress', eventHandler);
-      console.log('🔌 Unregistered workflow progress handler');
+    try {
+      if (currentConnection) {
+        currentConnection.off('receiveWorkflowProgress', eventHandler);
+        console.log('🔌 Unregistered workflow progress handler');
+      }
+    } catch (error) {
+      console.warn('⚠️ Error unregistering workflow progress handler:', error);
     }
   };
 }

@@ -1,4 +1,5 @@
-using System.Text.Json;
+using System.Text;
+using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.DTOs;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -6,66 +7,78 @@ namespace AgentFrameworkQuickStart.Examples;
 
 /// <summary>
 /// Example demonstrating multi-modal input with the Master Agent
+/// Uses the unified streaming API for all operations
 /// </summary>
 public static class MultiModalExample
 {
     /// <summary>
-    /// Example: Analyze a simple red square image
+    /// Example: Analyze a simple red square image (streaming)
     /// </summary>
     public static async Task RunImageAnalysisExample(IServiceProvider services)
     {
         Console.WriteLine("\n=== Multi-Modal Example: Image Analysis ===\n");
 
-        var orchestrator = services.GetRequiredService<Api.Abstractions.IMasterOrchestrator>();
+        var orchestrator = services.GetRequiredService<IMasterOrchestrator>();
 
         // Create a simple 1x1 red pixel PNG image (base64 encoded)
-        // This is a minimal valid PNG for testing
         var redPixelBase64 =
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
 
-        var request = new MultiModalChatRequest
+        var contentInputs = new List<ContentInput>
         {
-            Message = "What color is this image? Describe what you see.",
-            Contents = new List<ContentInput>
+            new()
             {
-                new ContentInput
-                {
-                    Type = "image",
-                    Data = $"data:image/png;base64,{redPixelBase64}",
-                    MediaType = "image/png",
-                },
+                Type = "image",
+                Data = $"data:image/png;base64,{redPixelBase64}",
+                MediaType = "image/png",
             },
+        };
+
+        var aiContents = Api.Helpers.ContentConverter.ConvertToAIContents(
+            contentInputs,
+            "What color is this image? Describe what you see."
+        );
+
+        var request = new UnifiedChatRequest
+        {
             ConversationId = Guid.NewGuid().ToString(),
+            Message = "What color is this image? Describe what you see.",
+            Contents = aiContents,
         };
 
         try
         {
-            // Convert to AIContent
-            var aiContents = Api.Helpers.ContentConverter.ConvertToAIContents(
-                request.Contents,
-                request.Message ?? string.Empty
-            );
-
             Console.WriteLine(
                 $"📤 Sending multi-modal request with {aiContents.Count} content items"
             );
-            Console.WriteLine($"   Message: {request.Message}");
-            Console.WriteLine(
-                $"   Content types: {string.Join(", ", request.Contents.Select(c => c.Type))}\n"
-            );
+            Console.WriteLine($"   Message: {request.Message}\n");
 
-            // Process through orchestrator
-            var result = await orchestrator.ProcessMultiModalRequestAsync(
-                aiContents,
-                request.ConversationId!
-            );
+            Console.WriteLine("🔄 Streaming response:");
+            var responseBuilder = new StringBuilder();
+            UnifiedChatResponse? finalResult = null;
 
-            Console.WriteLine($"✅ Response received in {result.TotalDurationMs}ms\n");
-            Console.WriteLine($"🤖 Agent response:\n{result.Response}\n");
-
-            if (result.SubAgentsUsed.Any())
+            await foreach (var chunk in orchestrator.ProcessAsync(request))
             {
-                Console.WriteLine($"📋 Sub-agents used: {string.Join(", ", result.SubAgentsUsed)}");
+                switch (chunk.Type)
+                {
+                    case StreamingChunkType.Content:
+                        Console.Write(chunk.Content);
+                        responseBuilder.Append(chunk.Content);
+                        break;
+
+                    case StreamingChunkType.Complete:
+                        finalResult = chunk.FinalResult;
+                        break;
+                }
+            }
+
+            Console.WriteLine($"\n\n✅ Response received in {finalResult?.TotalDurationMs}ms\n");
+
+            if (finalResult?.SubAgentsUsed.Count > 0)
+            {
+                Console.WriteLine(
+                    $"📋 Sub-agents used: {string.Join(", ", finalResult.SubAgentsUsed)}"
+                );
             }
         }
         catch (Exception ex)
@@ -76,65 +89,69 @@ public static class MultiModalExample
     }
 
     /// <summary>
-    /// Example: Streaming multi-modal response
+    /// Example: Streaming multi-modal response with thinking enabled
     /// </summary>
     public static async Task RunStreamingImageAnalysisExample(IServiceProvider services)
     {
         Console.WriteLine("\n=== Multi-Modal Streaming Example ===\n");
 
-        var orchestrator = services.GetRequiredService<Api.Abstractions.IMasterOrchestrator>();
+        var orchestrator = services.GetRequiredService<IMasterOrchestrator>();
 
         // Blue square image (1x1 pixel)
         var bluePixelBase64 =
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==";
 
-        var request = new MultiModalChatRequest
+        var contentInputs = new List<ContentInput>
         {
-            Message = "Describe the color and any patterns in this image.",
-            Contents = new List<ContentInput>
+            new()
             {
-                new ContentInput
-                {
-                    Type = "image",
-                    Data = $"data:image/png;base64,{bluePixelBase64}",
-                    MediaType = "image/png",
-                },
+                Type = "image",
+                Data = $"data:image/png;base64,{bluePixelBase64}",
+                MediaType = "image/png",
             },
+        };
+
+        var aiContents = Api.Helpers.ContentConverter.ConvertToAIContents(
+            contentInputs,
+            "Describe the color and any patterns in this image."
+        );
+
+        var request = new UnifiedChatRequest
+        {
             ConversationId = Guid.NewGuid().ToString(),
+            Message = "Describe the color and any patterns in this image.",
+            Contents = aiContents,
+            EnableThinking = true,
         };
 
         try
         {
-            var aiContents = Api.Helpers.ContentConverter.ConvertToAIContents(
-                request.Contents,
-                request.Message ?? string.Empty
-            );
-
             Console.WriteLine($"📤 Starting streaming multi-modal request");
             Console.WriteLine($"   Message: {request.Message}\n");
 
             Console.WriteLine("🔄 Streaming response:");
 
-            await foreach (
-                var chunk in orchestrator.ProcessMultiModalRequestStreamingAsync(
-                    aiContents,
-                    request.ConversationId!
-                )
-            )
+            await foreach (var chunk in orchestrator.ProcessAsync(request))
             {
                 switch (chunk.Type)
                 {
-                    case Api.Abstractions.ResponseType.Content:
+                    case StreamingChunkType.Thinking:
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
+                        Console.Write(chunk.Content);
+                        Console.ResetColor();
+                        break;
+
+                    case StreamingChunkType.Content:
                         Console.Write(chunk.Content);
                         break;
 
-                    case Api.Abstractions.ResponseType.ToolExecution:
+                    case StreamingChunkType.ToolExecution:
                         Console.WriteLine($"\n🔧 [Tool: {chunk.ToolName}]");
                         break;
 
-                    case Api.Abstractions.ResponseType.Complete:
+                    case StreamingChunkType.Complete:
                         Console.WriteLine(
-                            $"\n\n✅ Streaming complete ({chunk.Metadata?["totalDurationMs"]}ms)"
+                            $"\n\n✅ Streaming complete ({chunk.FinalResult?.TotalDurationMs}ms)"
                         );
                         break;
                 }
@@ -153,47 +170,49 @@ public static class MultiModalExample
     {
         Console.WriteLine("\n=== Multi-Modal Example: Mixed Content ===\n");
 
-        var orchestrator = services.GetRequiredService<Api.Abstractions.IMasterOrchestrator>();
+        var orchestrator = services.GetRequiredService<IMasterOrchestrator>();
 
         // Green square (1x1 pixel)
         var greenPixelBase64 =
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==";
 
-        var request = new MultiModalChatRequest
+        var contentInputs = new List<ContentInput>
         {
-            Contents = new List<ContentInput>
+            new()
             {
-                new ContentInput
-                {
-                    Type = "text",
-                    Text =
-                        "I'm analyzing a portfolio performance indicator. Please help me interpret it.",
-                },
-                new ContentInput
-                {
-                    Type = "image",
-                    Data = $"data:image/png;base64,{greenPixelBase64}",
-                    MediaType = "image/png",
-                    FileName = "indicator.png",
-                },
-                new ContentInput
-                {
-                    Type = "text",
-                    Text = "What does the color typically signify in financial dashboards?",
-                },
+                Type = "text",
+                Text =
+                    "I'm analyzing a portfolio performance indicator. Please help me interpret it.",
             },
+            new()
+            {
+                Type = "image",
+                Data = $"data:image/png;base64,{greenPixelBase64}",
+                MediaType = "image/png",
+                FileName = "indicator.png",
+            },
+            new()
+            {
+                Type = "text",
+                Text = "What does the color typically signify in financial dashboards?",
+            },
+        };
+
+        var aiContents = Api.Helpers.ContentConverter.ConvertToAIContents(
+            contentInputs,
+            string.Empty
+        );
+
+        var request = new UnifiedChatRequest
+        {
             ConversationId = Guid.NewGuid().ToString(),
+            Contents = aiContents,
         };
 
         try
         {
-            var aiContents = Api.Helpers.ContentConverter.ConvertToAIContents(
-                request.Contents,
-                string.Empty
-            );
-
-            Console.WriteLine($"📤 Sending mixed content request:");
-            foreach (var content in request.Contents)
+            Console.WriteLine("📤 Sending mixed content request:");
+            foreach (var content in contentInputs)
             {
                 if (content.Type == "text")
                 {
@@ -205,15 +224,22 @@ public static class MultiModalExample
                 }
             }
 
-            Console.WriteLine();
+            Console.WriteLine("\n🔄 Streaming response:");
+            UnifiedChatResponse? finalResult = null;
 
-            var result = await orchestrator.ProcessMultiModalRequestAsync(
-                aiContents,
-                request.ConversationId!
-            );
+            await foreach (var chunk in orchestrator.ProcessAsync(request))
+            {
+                if (chunk.Type == StreamingChunkType.Content)
+                {
+                    Console.Write(chunk.Content);
+                }
+                else if (chunk.Type == StreamingChunkType.Complete)
+                {
+                    finalResult = chunk.FinalResult;
+                }
+            }
 
-            Console.WriteLine($"🤖 Agent response:\n{result.Response}\n");
-            Console.WriteLine($"⏱️  Processing time: {result.TotalDurationMs}ms");
+            Console.WriteLine($"\n\n⏱️  Processing time: {finalResult?.TotalDurationMs}ms");
         }
         catch (Exception ex)
         {
@@ -228,34 +254,43 @@ public static class MultiModalExample
     {
         Console.WriteLine("\n=== Multi-Modal Example: URI Content ===\n");
 
-        var orchestrator = services.GetRequiredService<Api.Abstractions.IMasterOrchestrator>();
+        var orchestrator = services.GetRequiredService<IMasterOrchestrator>();
 
-        var request = new MultiModalChatRequest
+        var contentInputs = new List<ContentInput>
         {
-            Message = "Based on the image at this URL, what investment insights can you provide?",
-            Contents = new List<ContentInput>
-            {
-                new ContentInput { Type = "uri", Uri = "https://example.com/portfolio-chart.png" },
-            },
+            new() { Type = "uri", Uri = "https://example.com/portfolio-chart.png" },
+        };
+
+        var aiContents = Api.Helpers.ContentConverter.ConvertToAIContents(
+            contentInputs,
+            "Based on the image at this URL, what investment insights can you provide?"
+        );
+
+        var request = new UnifiedChatRequest
+        {
             ConversationId = Guid.NewGuid().ToString(),
+            Message = "Based on the image at this URL, what investment insights can you provide?",
+            Contents = aiContents,
         };
 
         try
         {
-            var aiContents = Api.Helpers.ContentConverter.ConvertToAIContents(
-                request.Contents,
-                request.Message ?? string.Empty
-            );
+            Console.WriteLine("📤 Sending URI-based request");
+            Console.WriteLine($"   URI: {contentInputs[0].Uri}\n");
 
-            Console.WriteLine($"📤 Sending URI-based request");
-            Console.WriteLine($"   URI: {request.Contents[0].Uri}\n");
+            Console.WriteLine("🔄 Streaming response:");
 
-            var result = await orchestrator.ProcessMultiModalRequestAsync(
-                aiContents,
-                request.ConversationId!
-            );
-
-            Console.WriteLine($"🤖 Response:\n{result.Response}\n");
+            await foreach (var chunk in orchestrator.ProcessAsync(request))
+            {
+                if (chunk.Type == StreamingChunkType.Content)
+                {
+                    Console.Write(chunk.Content);
+                }
+                else if (chunk.Type == StreamingChunkType.Complete)
+                {
+                    Console.WriteLine($"\n\n✅ Complete ({chunk.FinalResult?.TotalDurationMs}ms)");
+                }
+            }
         }
         catch (Exception ex)
         {

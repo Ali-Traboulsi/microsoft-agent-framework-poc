@@ -5,7 +5,8 @@ using AgentFrameworkQuickStart.Api.DTOs;
 namespace AgentFrameworkQuickStart.Api.Hubs.Handlers;
 
 /// <summary>
-/// Handles basic chat streaming operations
+/// Handles chat streaming operations
+/// All requests use intelligent streaming processing
 /// </summary>
 public class ChatStreamHandler(IMasterOrchestrator orchestrator) : IChatHandler
 {
@@ -16,36 +17,42 @@ public class ChatStreamHandler(IMasterOrchestrator orchestrator) : IChatHandler
         [EnumeratorCancellation] CancellationToken cancellationToken
     )
     {
-        await foreach (
-            var response in orchestrator
-                .ProcessRequestStreamingAsync(message, conversationId, enableThinking)
-                .WithCancellation(cancellationToken)
-        )
+        var request = new UnifiedChatRequest
+        {
+            ConversationId = conversationId,
+            Message = message,
+            EnableThinking = enableThinking,
+            CancellationToken = cancellationToken,
+        };
+
+        await foreach (var chunk in orchestrator.ProcessAsync(request, cancellationToken))
         {
             if (cancellationToken.IsCancellationRequested)
                 break;
 
-            yield return MapToStreamingResponse(response);
+            yield return MapChunkToStreamingResponse(chunk);
         }
     }
 
-    internal static MasterStreamingResponse MapToStreamingResponse(OrchestratorResponse response) =>
+    internal static MasterStreamingResponse MapChunkToStreamingResponse(
+        UnifiedStreamingChunk chunk
+    ) =>
         new()
         {
-            Type = response.Type.ToString(),
-            Content = response.Content,
-            SubAgentName = response.SubAgentName,
-            ToolName = response.ToolName,
-            IsComplete = response.Type == ResponseType.Complete,
-            Metadata = response.Metadata,
-            StepId = response.StepId,
-            StepName = response.StepName,
-            StepNameAr = response.StepNameAr,
-            StepNumber = response.StepNumber,
-            TotalSteps = response.TotalSteps,
-            StepCompleted = response.Type == ResponseType.StepComplete,
-            StepDurationMs = response.StepDurationMs,
-            StepDetails = response.StepDetails,
-            ProjectionResult = response.ProjectionResult,
+            Type = chunk.Type.ToString(),
+            Content = chunk.Content,
+            SubAgentName = chunk.SubAgentName,
+            ToolName = chunk.ToolName,
+            IsComplete = chunk.Type == StreamingChunkType.Complete,
+            Metadata = chunk.Metadata,
+            StepId = chunk.StepId,
+            StepName = chunk.StepName,
+            StepNameAr = chunk.StepNameAr,
+            StepNumber = chunk.StepNumber,
+            TotalSteps = chunk.TotalSteps,
+            StepCompleted = chunk.Type == StreamingChunkType.StepComplete,
+            StepDurationMs = chunk.StepDurationMs,
+            StepDetails = chunk.StepDetails,
+            ProjectionResult = chunk.FinalResult?.ProjectionResult,
         };
 }

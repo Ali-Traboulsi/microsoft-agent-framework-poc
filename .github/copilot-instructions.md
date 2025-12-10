@@ -166,3 +166,11 @@ Run demo scenarios: `dotnet run` (executes 9 predefined scenarios in `Program.cs
 - **database:** migrations should be present and up to date
 - Do not create files with over 500 lines of code. Split into multiple files as needed
 - use primary constructor syntax for classes where possible
+
+## Migrations 
+
+To add a new migration, use the following command in the terminal:
+
+```bash
+export DOTNET_ROLL_FORWARD=LatestMajor && dotnet ef migrations add <MigrationName> --project ./apps/backend/src/Api --startup-project ./apps/backend/src/Api
+```

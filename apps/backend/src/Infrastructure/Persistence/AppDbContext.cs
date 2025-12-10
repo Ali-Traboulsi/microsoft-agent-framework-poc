@@ -15,6 +15,8 @@ public class AppDbContext : DbContext
     public DbSet<ChatMessage> Messages => Set<ChatMessage>();
     public DbSet<ConversationMemoryEntry> ConversationMemoryEntries =>
         Set<ConversationMemoryEntry>();
+    public DbSet<ConversationContextEntity> ConversationContexts =>
+        Set<ConversationContextEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -79,6 +81,38 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.ConversationId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Configure ConversationContextEntity
+        modelBuilder.Entity<ConversationContextEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.ConversationId).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.UserId).HasMaxLength(100);
+            entity.Property(e => e.UserExpertiseLevel).HasMaxLength(50);
+            entity.Property(e => e.PreferredLanguage).HasMaxLength(10);
+            entity.Property(e => e.InferredRiskTolerance).HasMaxLength(50);
+
+            // JSON columns
+            entity.Property(e => e.EntitiesJson).HasColumnType("TEXT");
+            entity.Property(e => e.GoalsJson).HasColumnType("TEXT");
+            entity.Property(e => e.DecisionsJson).HasColumnType("TEXT");
+            entity.Property(e => e.SubAgentFindingsJson).HasColumnType("TEXT");
+            entity.Property(e => e.PendingActionsJson).HasColumnType("TEXT");
+            entity.Property(e => e.ActiveConstraintsJson).HasColumnType("TEXT");
+
+            // Indexes
+            entity.HasIndex(e => e.ConversationId).IsUnique();
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.LastActivityAt);
+
+            // Optional relationship with ChatThread
+            entity
+                .HasOne(e => e.Thread)
+                .WithMany()
+                .HasForeignKey(e => e.ThreadId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

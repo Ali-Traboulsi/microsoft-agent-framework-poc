@@ -7,6 +7,7 @@ namespace AgentFrameworkQuickStart.Api.Hubs;
 
 /// <summary>
 /// SignalR hub for master orchestrator with streaming support.
+/// All chat requests now use intelligent processing by default (P0 Intelligence Layer).
 /// Note: For file uploads with streaming, use ChatStreamMultiModal with base64-encoded data.
 /// For direct file uploads without streaming, use the HTTP endpoint /chat/multimodal/upload.
 /// </summary>
@@ -18,6 +19,7 @@ public class MasterAgentHub(
 {
     /// <summary>
     /// Stream chat responses from the master orchestrator
+    /// Uses intelligent processing with intent classification and context management
     /// </summary>
     public async IAsyncEnumerable<MasterStreamingResponse> ChatStream(
         string message,

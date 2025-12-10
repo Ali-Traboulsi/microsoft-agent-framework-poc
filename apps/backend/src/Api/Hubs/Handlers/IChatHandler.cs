@@ -4,6 +4,7 @@ namespace AgentFrameworkQuickStart.Api.Hubs.Handlers;
 
 /// <summary>
 /// Interface for chat stream handlers
+/// All processing uses intelligent mode by default
 /// </summary>
 public interface IChatHandler
 {

@@ -45,20 +45,21 @@ public class MultiModalChatHandler(
 
         var conversationId = request.ConversationId ?? Guid.NewGuid().ToString();
 
-        await foreach (
-            var response in orchestrator
-                .ProcessMultiModalRequestStreamingAsync(
-                    aiContents,
-                    conversationId,
-                    request.EnableThinking
-                )
-                .WithCancellation(cancellationToken)
-        )
+        var unifiedRequest = new UnifiedChatRequest
+        {
+            ConversationId = conversationId,
+            Message = request.Message,
+            Contents = aiContents,
+            EnableThinking = request.EnableThinking,
+            CancellationToken = cancellationToken,
+        };
+
+        await foreach (var chunk in orchestrator.ProcessAsync(unifiedRequest, cancellationToken))
         {
             if (cancellationToken.IsCancellationRequested)
                 break;
 
-            yield return ChatStreamHandler.MapToStreamingResponse(response);
+            yield return ChatStreamHandler.MapChunkToStreamingResponse(chunk);
         }
     }
 
