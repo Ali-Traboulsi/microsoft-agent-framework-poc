@@ -4,7 +4,6 @@ using System.Text;
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.Middleware;
 using AgentFrameworkQuickStart.Core.Domain.Intelligence;
-using AgentFrameworkQuickStart.Core.Domain.Reasoning;
 using Microsoft.Extensions.AI;
 
 namespace AgentFrameworkQuickStart.Api.Orchestration;
@@ -13,7 +12,7 @@ namespace AgentFrameworkQuickStart.Api.Orchestration;
 /// Master orchestrator - Unified streaming processing
 /// This is the primary entry point for all requests - STREAMING ONLY
 /// </summary>
-public partial class MasterOrchestratorHelper
+public partial class MasterOrchestrator
 {
     /// <summary>
     /// Process any request with streaming response.

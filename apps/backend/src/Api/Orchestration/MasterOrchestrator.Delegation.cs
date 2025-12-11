@@ -9,7 +9,7 @@ namespace AgentFrameworkQuickStart.Api.Orchestration;
 /// <summary>
 /// Master orchestrator - Sub-agent delegation methods
 /// </summary>
-public partial class MasterOrchestratorHelper
+public partial class MasterOrchestrator
 {
     [Description("Delegate a request to a specific sub-agent specialist")]
     public async Task<string> DelegateToSubAgent(

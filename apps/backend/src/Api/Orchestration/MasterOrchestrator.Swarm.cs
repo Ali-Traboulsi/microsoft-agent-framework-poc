@@ -12,7 +12,7 @@ namespace AgentFrameworkQuickStart.Api.Orchestration;
 /// This partial class adds OpenAI Swarm-inspired sub-agent coordination.
 /// Sub-agents are exposed as tools, and the LLM naturally decides which to call.
 /// </summary>
-public partial class MasterOrchestratorHelper
+public partial class MasterOrchestrator
 {
     // Conversation state for Swarm pattern (maintains history across turns)
     private static readonly Dictionary<string, SwarmConversationHistory> SwarmHistories = new();
@@ -233,7 +233,7 @@ public partial class MasterOrchestratorHelper
         var agentDescriptions = string.Join(
             "\n",
             _subAgents.Select(a =>
-                $"- {a.Name}: {a.Domain}. Capabilities: {string.Join(", ", a.Capabilities)}"
+                $"- ask_{a.Name.ToLowerInvariant()}: {a.Domain}. Capabilities: {string.Join(", ", a.Capabilities)}"
             )
         );
 
@@ -249,7 +249,43 @@ public partial class MasterOrchestratorHelper
             AVAILABLE SPECIALIST AGENTS (call as tools when needed):
             {agentDescriptions}
 
-            CRITICAL - MULTI-TURN CONVERSATION HANDLING:
+            CRITICAL ROUTING RULES - ALWAYS FOLLOW:
+
+            **Profit Projections & Growth Calculations → ask_profitprojection**
+            When user asks about ANY of these, you MUST call ask_profitprojection:
+            - "project growth", "calculate returns", "estimate profit"
+            - "how much will I earn", "what will my investment grow to"
+            - Any mention of: amount + time horizon + (optional) risk profile
+            - "200000 SAR for 10 years" → MUST call ask_profitprojection
+            - Keywords: project, projection, growth, calculate, estimate, earn, return, profit
+
+            **Fund Recommendations & Analysis → ask_investmentadvisor**
+            - "find the best fund", "recommend a fund", "which fund should I invest in"
+            - Fund comparisons and suitability analysis
+
+            **COMPOSITE REQUESTS - CHAIN MULTIPLE AGENTS:**
+            When a request has MULTIPLE parts, call MULTIPLE agents in sequence!
+
+            Example: "find the best fund and project growth for 200000 SAR over 10 years"
+            1. FIRST call ask_investmentadvisor to get fund recommendation
+            2. THEN call ask_profitprojection with the amount (200000), duration (10 years), risk profile
+
+            Example: "show my portfolio and calculate projections"
+            1. FIRST call ask_portfoliomanager to get portfolio
+            2. THEN call ask_profitprojection for projections
+
+            NEVER try to calculate projections yourself. ALWAYS delegate to ask_profitprojection.
+            NEVER skip the second part of a composite request.
+
+            **Other Routing:**
+            - Portfolio questions → ask_portfoliomanager
+            - Account operations/balances → ask_accountservices
+            - Compliance/risk assessment → ask_complianceofficer
+            - External APIs (SNB Capital, mutual funds) → ask_externalapiservices
+            - CIF lookups / customer data → ask_externalapiservices
+            - Web search / current information → SearchWeb
+
+            MULTI-TURN CONVERSATION HANDLING:
             You are in a MULTI-TURN conversation. The chat history above shows previous exchanges.
 
             When the user sends a SHORT message like:
@@ -260,15 +296,6 @@ public partial class MasterOrchestratorHelper
             - Any code/ID pattern → This is likely an answer to something you asked
 
             ALWAYS look at the PREVIOUS assistant message to understand what you asked for.
-            If you asked for an account ID and user responds "ACC001", IMMEDIATELY call ask_accountservices with that account ID.
-
-            DO NOT say "I don't understand" or ask for clarification when the user is clearly answering your question.
-
-            WORKFLOW:
-            1. Read the conversation history to understand context
-            2. If user is providing information you asked for → USE IT by calling the appropriate agent
-            3. If user is making a new request → Process it normally
-            4. Always be helpful and proactive
             {entityContext}
 
             RESPONSE FORMAT:

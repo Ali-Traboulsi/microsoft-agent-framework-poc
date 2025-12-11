@@ -8,9 +8,9 @@ using Microsoft.Extensions.AI;
 namespace AgentFrameworkQuickStart.Api.Orchestration;
 
 /// <summary>
-/// Helper methods for the Master Orchestrator
+/// Master orchestrator - Helper methods and utilities
 /// </summary>
-public partial class MasterOrchestratorHelper : IMasterOrchestratorHelper
+public partial class MasterOrchestrator
 {
     [System.ComponentModel.Description(
         "Get information about all available sub-agents and their capabilities"
@@ -35,10 +35,6 @@ public partial class MasterOrchestratorHelper : IMasterOrchestratorHelper
         return result.ToString();
     }
 
-    /// <summary>
-    /// Get information about all available sub-agents and their capabilities
-    /// </summary>
-    /// <returns></returns>
     public List<SubAgentInfo> GetAvailableSubAgents()
     {
         return _subAgents
@@ -55,7 +51,7 @@ public partial class MasterOrchestratorHelper : IMasterOrchestratorHelper
     /// Format reasoning chain as human-readable text.
     /// Converts structured reasoning steps into natural language.
     /// </summary>
-    public string FormatReasoningAsHumanReadable(ThoughtChain thoughtChain)
+    public static string FormatReasoningAsHumanReadable(ThoughtChain thoughtChain)
     {
         var sb = new StringBuilder();
 
@@ -178,7 +174,7 @@ public partial class MasterOrchestratorHelper : IMasterOrchestratorHelper
     /// <summary>
     /// Extract transcription from multi-modal contents if available
     /// </summary>
-    public string? ExtractTranscriptionFromContents(List<AIContent> contents)
+    public static string? ExtractTranscriptionFromContents(List<AIContent> contents)
     {
         var textContent = contents.OfType<TextContent>().FirstOrDefault();
         if (
@@ -290,7 +286,7 @@ public partial class MasterOrchestratorHelper : IMasterOrchestratorHelper
     /// <summary>
     /// Determine which agent should handle a response based on entity type
     /// </summary>
-    public string DetermineAgentForEntityType(string entityType, UserIntent intent)
+    public static string DetermineAgentForEntityType(string entityType, UserIntent intent)
     {
         return entityType switch
         {
@@ -308,7 +304,7 @@ public partial class MasterOrchestratorHelper : IMasterOrchestratorHelper
     /// Generate human-readable thinking text instead of technical jargon.
     /// Produces natural language like "I understand you want to... I'll help by..."
     /// </summary>
-    public string GenerateHumanReadableThinking(UserIntent intent)
+    public static string GenerateHumanReadableThinking(UserIntent intent)
     {
         var sb = new StringBuilder();
 
@@ -381,7 +377,7 @@ public partial class MasterOrchestratorHelper : IMasterOrchestratorHelper
     /// <summary>
     /// Get a friendly description of what an agent does (action-oriented)
     /// </summary>
-    public string GetFriendlyAgentDescription(string agentName)
+    private static string GetFriendlyAgentDescription(string agentName)
     {
         return agentName switch
         {
@@ -398,7 +394,7 @@ public partial class MasterOrchestratorHelper : IMasterOrchestratorHelper
     /// <summary>
     /// Get a friendly description of an extracted entity
     /// </summary>
-    public string GetFriendlyEntityDescription(string entityType, string value)
+    private static string GetFriendlyEntityDescription(string entityType, string value)
     {
         var displayValue = value.Length > 20 ? value[..17] + "..." : value;
         return entityType switch
