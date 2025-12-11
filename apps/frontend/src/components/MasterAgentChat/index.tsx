@@ -2,15 +2,15 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { ProjectionResult } from '../../interfaces/ProjectionResult.interface';
 import {
-    chatStreamMultiModal,
-    chatStreamWithThread,
-    connect,
-    disconnect,
-    onDelegationEvent,
-    onWorkflowProgress,
-    type DelegationEvent,
-    type MasterStreamResponse,
-    type WorkflowProgressEvent
+  chatStreamMultiModal,
+  chatStreamWithThread,
+  connect,
+  disconnect,
+  onDelegationEvent,
+  onWorkflowProgress,
+  type DelegationEvent,
+  type MasterStreamResponse,
+  type WorkflowProgressEvent
 } from '../../services/masterAgent';
 import { ChatMessage, TelemetryData } from '../../services/masterAgent/types';
 import { ChatThread, getThread, ThreadMessage } from '../../services/threads';
@@ -22,10 +22,10 @@ import { ConnectionBanner } from './components/ConnectionBanner';
 import { Sidebar } from './components/Sidebar';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import {
-    buildTelemetryData,
-    createMessage,
-    createTelemetryContext,
-    prepareFileContents
+  buildTelemetryData,
+  createMessage,
+  createTelemetryContext,
+  prepareFileContents
 } from './utils';
 
 export const MasterAgentChat: React.FC = () => {
@@ -514,14 +514,12 @@ export const MasterAgentChat: React.FC = () => {
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        connectionError={connectionError}
         showThreadList={showThreadList}
         onToggleView={setShowThreadList}
         currentThreadId={currentThreadId}
         onSelectThread={handleSelectThread}
         onNewChat={handleNewChat}
         threadRefreshTrigger={threadRefreshTrigger}
-        conversationId={conversationId.current}
       />
 
       <div className="flex-1 flex flex-col bg-white dark:bg-gray-900">
@@ -534,7 +532,7 @@ export const MasterAgentChat: React.FC = () => {
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
             {messages.length === 0 ? (
-              <WelcomeScreen />
+              <WelcomeScreen onSuggestionClick={(text) => setInput(text)} />
             ) : (
               <ChatMessages messages={messages} isStreaming={isStreaming} />
             )}

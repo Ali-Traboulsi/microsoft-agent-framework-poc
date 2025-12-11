@@ -5,14 +5,12 @@ import ThreadList from '../../ThreadList';
 interface SidebarProps {
   collapsed: boolean;
   onToggleCollapse: () => void;
-  connectionError: string | null;
   showThreadList: boolean;
   onToggleView: (show: boolean) => void;
   currentThreadId: string | null;
   onSelectThread: (thread: ChatThread | null) => Promise<void>;
   onNewChat: () => void;
   threadRefreshTrigger: number;
-  conversationId: string;
 }
 
 const AVAILABLE_AGENTS = [
@@ -25,14 +23,12 @@ const AVAILABLE_AGENTS = [
 export const Sidebar: React.FC<SidebarProps> = ({
   collapsed,
   onToggleCollapse,
-  connectionError,
   showThreadList,
   onToggleView,
   currentThreadId,
   onSelectThread,
   onNewChat,
   threadRefreshTrigger,
-  conversationId,
 }) => {
   return (
     <div
@@ -64,19 +60,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* Connection Status */}
-      {!collapsed && (
-        <div className="px-6 py-4 border-b border-slate-700">
-          <div className="flex items-center gap-2 text-sm">
-            <div
-              className={`w-2 h-2 rounded-full ${
-                connectionError ? 'bg-red-500 animate-pulse' : 'bg-green-500'
-              }`}
-            />
-            <span className="text-slate-300">{connectionError ? 'Disconnected' : 'Connected'}</span>
-          </div>
-        </div>
-      )}
 
       {/* Thread List / Agents Toggle */}
       {!collapsed && (
@@ -143,21 +126,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
 
-      {/* Footer */}
-      {!collapsed && (
-        <div className="p-4 border-t border-slate-700 space-y-2">
-          <div className="text-xs">
-            <div className="text-slate-400 mb-1">Conversation ID</div>
-            <div className="font-mono text-slate-300 bg-slate-800/50 px-2 py-1 rounded text-[10px] break-all">
-              {conversationId}
-            </div>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <div className="w-2 h-2 rounded-full bg-green-500"></div>
-            <span>History tracked on server</span>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

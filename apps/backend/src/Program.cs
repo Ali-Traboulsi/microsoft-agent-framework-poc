@@ -65,15 +65,15 @@ builder
 builder.Services.AddHttpClient();
 
 // Configure OpenTelemetry for comprehensive observability
-var serviceName = "InvestmentBankingAgents";
-var serviceVersion = "2.0.0";
-var enableAzureMonitor = !string.IsNullOrEmpty(
-    builder.Configuration["ApplicationInsights:ConnectionString"]
-);
+// var serviceName = "InvestmentBankingAgents";
+// var serviceVersion = "2.0.0";
+// var enableAzureMonitor = !string.IsNullOrEmpty(
+//     builder.Configuration["ApplicationInsights:ConnectionString"]
+// );
 
 // Control console output verbosity (set to false to reduce noise)
-var enableConsoleExporter = builder.Configuration.GetValue("OpenTelemetry:ConsoleExporter", true);
-var enableRuntimeMetrics = builder.Configuration.GetValue("OpenTelemetry:RuntimeMetrics", false); // Disabled by default - too verbose
+// var enableConsoleExporter = builder.Configuration.GetValue("OpenTelemetry:ConsoleExporter", true);
+// var enableRuntimeMetrics = builder.Configuration.GetValue("OpenTelemetry:RuntimeMetrics", false); // Disabled by default - too verbose
 
 // builder
 //     .Services.AddOpenTelemetry()
@@ -182,36 +182,36 @@ var enableRuntimeMetrics = builder.Configuration.GetValue("OpenTelemetry:Runtime
 //         // Azure Monitor uses Azure SDK, not OTLP
 //     });
 
-// Add Azure Monitor if connection string is configured
-if (enableAzureMonitor)
-{
-    builder
-        .Services.AddOpenTelemetry()
-        .UseAzureMonitor(options =>
-        {
-            options.ConnectionString = builder.Configuration[
-                "ApplicationInsights:ConnectionString"
-            ];
-        });
+// // Add Azure Monitor if connection string is configured
+// if (enableAzureMonitor)
+// {
+//     builder
+//         .Services.AddOpenTelemetry()
+//         .UseAzureMonitor(options =>
+//         {
+//             options.ConnectionString = builder.Configuration[
+//                 "ApplicationInsights:ConnectionString"
+//             ];
+//         });
 
-    Console.WriteLine(
-        $"✅ Azure Monitor enabled for '{serviceName}' v{serviceVersion} in {builder.Environment.EnvironmentName} environment"
-    );
-}
-else
-{
-    Console.WriteLine($"ℹ️  OpenTelemetry configured for '{serviceName}' v{serviceVersion}");
-    Console.WriteLine(
-        $"   Console Exporter: {(enableConsoleExporter ? "Enabled (verbose)" : "Disabled")}"
-    );
-    Console.WriteLine(
-        $"   Runtime Metrics: {(enableRuntimeMetrics ? "Enabled" : "Disabled (too verbose)")}"
-    );
-    Console.WriteLine(
-        "   To enable Azure Monitor, set ApplicationInsights:ConnectionString in configuration"
-    );
-    Console.WriteLine("   To disable console output, set OpenTelemetry:ConsoleExporter=false");
-}
+//     Console.WriteLine(
+//         $"✅ Azure Monitor enabled for '{serviceName}' v{serviceVersion} in {builder.Environment.EnvironmentName} environment"
+//     );
+// }
+// else
+// {
+//     Console.WriteLine($"ℹ️  OpenTelemetry configured for '{serviceName}' v{serviceVersion}");
+//     Console.WriteLine(
+//         $"   Console Exporter: {(enableConsoleExporter ? "Enabled (verbose)" : "Disabled")}"
+//     );
+//     Console.WriteLine(
+//         $"   Runtime Metrics: {(enableRuntimeMetrics ? "Enabled" : "Disabled (too verbose)")}"
+//     );
+//     Console.WriteLine(
+//         "   To enable Azure Monitor, set ApplicationInsights:ConnectionString in configuration"
+//     );
+//     Console.WriteLine("   To disable console output, set OpenTelemetry:ConsoleExporter=false");
+// }
 
 // Add OpenAPI/Swagger
 builder.Services.AddEndpointsApiExplorer();
@@ -356,7 +356,11 @@ builder.Services.AddScoped<IMultiModalChatHandler, MultiModalChatHandler>();
 builder.Services.AddScoped<IThreadedChatHandler, ThreadedChatHandler>();
 
 // Register Master Orchestrator (Scoped - one instance per request)
-builder.Services.AddScoped<IMasterOrchestrator, MasterOrchestrator>();
+// Now includes Swarm pattern for intelligent sub-agent coordination
+builder.Services.AddScoped<IMasterOrchestrator, MasterOrchestratorHelper>();
+
+// Register Coordination Orchestrator (Scoped - for sub-agent coordination protocol)
+builder.Services.AddScoped<CoordinationOrchestrator>();
 
 // Register Workflows (Scoped - one instance per request)
 builder.Services.AddScoped<IWorkflow, CompleteInvestmentWorkflow>();
@@ -437,6 +441,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = Dat
 // SignalR Hubs
 app.MapHub<AgentHub>("/hubs/agent"); // Legacy individual agents
 app.MapHub<MasterAgentHub>("/hubs/master"); // New master orchestrator
+app.MapHub<CoordinationHub>("/hubs/coordination"); // Sub-agent coordination protocol
 
 // Root endpoint
 app.MapGet(

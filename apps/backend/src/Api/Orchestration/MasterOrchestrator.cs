@@ -14,7 +14,7 @@ namespace AgentFrameworkQuickStart.Api.Orchestration;
 /// <summary>
 /// Master orchestrator that coordinates multiple specialized sub-agents.
 /// </summary>
-public partial class MasterOrchestrator : IMasterOrchestrator
+public partial class MasterOrchestratorHelper : IMasterOrchestrator
 {
     // OpenTelemetry observability
     private static readonly ActivitySource ActivitySource = new(
@@ -38,7 +38,7 @@ public partial class MasterOrchestrator : IMasterOrchestrator
 
     private readonly IChatClient _chatClient;
     private readonly IEnumerable<ISubAgent> _subAgents;
-    private readonly ILogger<MasterOrchestrator> _logger;
+    private readonly ILogger<MasterOrchestratorHelper> _logger;
     private readonly ILoggerFactory _loggerFactory;
     private readonly Lazy<AIAgent> _masterAgent;
     private readonly Dictionary<string, ISubAgent> _subAgentLookup;
@@ -53,6 +53,9 @@ public partial class MasterOrchestrator : IMasterOrchestrator
     private readonly FastIntentMatcher _fastIntentMatcher;
     private readonly ReasoningEngine _reasoningEngine;
 
+    // Sub-Agent Coordination Protocol
+    private readonly CoordinationOrchestrator _coordinationOrchestrator;
+
     // Metrics for intelligence layer
     private static readonly Counter<long> IntentClassificationCounter = Meter.CreateCounter<long>(
         "orchestrator.intent_classifications",
@@ -65,11 +68,11 @@ public partial class MasterOrchestrator : IMasterOrchestrator
             description: "Duration of intent classification"
         );
 
-    public MasterOrchestrator(
+    public MasterOrchestratorHelper(
         IChatClient chatClient,
         IEnumerable<ISubAgent> subAgents,
         WebSearchTools webSearchTools,
-        ILogger<MasterOrchestrator> logger,
+        ILogger<MasterOrchestratorHelper> logger,
         ILoggerFactory loggerFactory,
         AgentThreadManager threadManager,
         SubAgentThreadManager subAgentThreadManager,
@@ -77,7 +80,8 @@ public partial class MasterOrchestrator : IMasterOrchestrator
         IIntentClassifier intentClassifier,
         IConversationContextStore contextStore,
         FastIntentMatcher fastIntentMatcher,
-        ReasoningEngine reasoningEngine
+        ReasoningEngine reasoningEngine,
+        CoordinationOrchestrator coordinationOrchestrator
     )
     {
         _chatClient = chatClient;
@@ -92,6 +96,7 @@ public partial class MasterOrchestrator : IMasterOrchestrator
         _contextStore = contextStore;
         _fastIntentMatcher = fastIntentMatcher;
         _reasoningEngine = reasoningEngine;
+        _coordinationOrchestrator = coordinationOrchestrator;
         _subAgentLookup = subAgents.ToDictionary(sa => sa.Name, sa => sa);
         _masterAgent = new Lazy<AIAgent>(CreateMasterAgentWithMiddleware);
     }

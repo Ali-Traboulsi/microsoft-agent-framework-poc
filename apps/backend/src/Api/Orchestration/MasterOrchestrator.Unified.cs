@@ -13,7 +13,7 @@ namespace AgentFrameworkQuickStart.Api.Orchestration;
 /// Master orchestrator - Unified streaming processing
 /// This is the primary entry point for all requests - STREAMING ONLY
 /// </summary>
-public partial class MasterOrchestrator
+public partial class MasterOrchestratorHelper
 {
     /// <summary>
     /// Process any request with streaming response.
@@ -78,36 +78,68 @@ public partial class MasterOrchestrator
                 };
             }
 
-            // Try fast pattern matching first (for obvious intents)
-            var fastMatch = _fastIntentMatcher.TryMatch(message);
+            // Check if this looks like a follow-up answer (short message after conversation started)
+            var swarmHistory = GetOrCreateSwarmHistory(request.ConversationId);
+            var isLikelyFollowUp = swarmHistory.Messages.Count > 0 && message.Length < 50;
             var classificationSw = Stopwatch.StartNew();
 
-            if (fastMatch != null && fastMatch.Confidence >= 0.85)
+            if (isLikelyFollowUp)
             {
-                // Fast path - use pattern-matched intent
-                classifiedIntent = fastMatch.ToUserIntent(message);
+                // Skip complex intent classification for likely follow-ups
+                // The Swarm LLM will understand the context from conversation history
+                // Set confidence to 0.95 to skip chain-of-thought reasoning (triggers at < 0.9)
+                classifiedIntent = new UserIntent
+                {
+                    OriginalMessage = message,
+                    PrimaryIntent = IntentType.Clarification,
+                    Confidence = 0.95, // High confidence to skip reasoning
+                    Strategy = ExecutionStrategy.SingleAgent,
+                    IntentSummary = $"Follow-up response: {message}",
+                    RequiredSubAgents = [],
+                    Entities = [],
+                };
                 classificationSw.Stop();
 
                 _logger.LogInformation(
-                    "FastIntentMatcher matched: {Intent} (confidence: {Confidence:P0}) - Reason: {Reason}",
-                    classifiedIntent.PrimaryIntent,
-                    classifiedIntent.Confidence,
-                    fastMatch.MatchReason
+                    "🔄 Detected likely follow-up (short message with history): '{Message}'",
+                    message
                 );
 
-                activity?.SetTag("intent.source", "fast_match");
+                activity?.SetTag("intent.source", "follow_up_detection");
             }
             else
             {
-                // Fall back to LLM classification
-                classifiedIntent = await _intentClassifier.ClassifyAsync(
-                    message,
-                    context,
-                    effectiveCancellation
-                );
-                classificationSw.Stop();
+                // Try fast pattern matching first (for obvious intents)
+                // Pass context to enable follow-up detection (e.g., "ACC001" after being asked for account ID)
+                var fastMatch = _fastIntentMatcher.TryMatch(message, context);
 
-                activity?.SetTag("intent.source", "llm_classifier");
+                if (fastMatch != null && fastMatch.Confidence >= 0.85)
+                {
+                    // Fast path - use pattern-matched intent
+                    classifiedIntent = fastMatch.ToUserIntent(message);
+                    classificationSw.Stop();
+
+                    _logger.LogInformation(
+                        "FastIntentMatcher matched: {Intent} (confidence: {Confidence:P0}) - Reason: {Reason}",
+                        classifiedIntent.PrimaryIntent,
+                        classifiedIntent.Confidence,
+                        fastMatch.MatchReason
+                    );
+
+                    activity?.SetTag("intent.source", "fast_match");
+                }
+                else
+                {
+                    // Fall back to LLM classification
+                    classifiedIntent = await _intentClassifier.ClassifyAsync(
+                        message,
+                        context,
+                        effectiveCancellation
+                    );
+                    classificationSw.Stop();
+
+                    activity?.SetTag("intent.source", "llm_classifier");
+                }
             }
 
             IntentClassificationCounter.Add(
@@ -134,74 +166,35 @@ public partial class MasterOrchestrator
                 classifiedIntent.Strategy
             );
 
-            // Emit intent classification as thinking
-            if (request.EnableThinking)
+            // Emit human-readable thinking/reasoning
+            if (request.EnableThinking && !isLikelyFollowUp)
             {
-                yield return new UnifiedStreamingChunk
+                // For complex or uncertain cases, use the reasoning engine
+                if (classifiedIntent.Confidence < 0.85 || classifiedIntent.IsComposite)
                 {
-                    Type = StreamingChunkType.Thinking,
-                    Content =
-                        $"Detected intent: {classifiedIntent.PrimaryIntent} ({classifiedIntent.Confidence:P0} confidence)\n"
-                        + $"Strategy: {classifiedIntent.Strategy}\n"
-                        + (
-                            classifiedIntent.RequiredSubAgents.Count > 0
-                                ? $"Delegating to: {string.Join(", ", classifiedIntent.RequiredSubAgents)}\n"
-                                : ""
-                        ),
-                };
-            }
+                    var thoughtChain = await _reasoningEngine.ReasonAsync(
+                        message,
+                        classifiedIntent,
+                        context,
+                        effectiveCancellation
+                    );
 
-            // Chain-of-Thought Reasoning (for complex or low-confidence cases)
-            ThoughtChain? thoughtChain = null;
-            if (
-                request.EnableThinking
-                && (classifiedIntent.Confidence < 0.9 || classifiedIntent.IsComposite)
-            )
-            {
-                thoughtChain = await _reasoningEngine.ReasonAsync(
-                    message,
-                    classifiedIntent,
-                    context,
-                    effectiveCancellation
-                );
-
-                // Stream reasoning steps
-                foreach (var step in thoughtChain.Steps.Take(4)) // Limit to avoid verbosity
-                {
-                    var emoji = step.Type switch
-                    {
-                        ReasoningStepType.Observation => "👀",
-                        ReasoningStepType.Analysis => "🔍",
-                        ReasoningStepType.EntityExtraction => "📋",
-                        ReasoningStepType.DelegationReasoning => "🤝",
-                        ReasoningStepType.Conclusion => "🎯",
-                        _ => "•",
-                    };
-
+                    // Format reasoning in human-readable way
+                    var reasoningText = FormatReasoningAsHumanReadable(thoughtChain);
                     yield return new UnifiedStreamingChunk
                     {
-                        Type = StreamingChunkType.Reasoning,
-                        Content = $"{emoji} {step.Thought}\n",
-                        Metadata = new Dictionary<string, object>
-                        {
-                            ["stepType"] = step.Type.ToString(),
-                            ["stepNumber"] = step.StepNumber,
-                            ["confidence"] = step.Confidence,
-                        },
+                        Type = StreamingChunkType.Thinking,
+                        Content = reasoningText,
                     };
                 }
-
-                // If reasoning suggests confirmation is needed
-                if (thoughtChain.FinalDecision?.RequiresConfirmation == true)
+                else
                 {
+                    // Simple case - just show understanding
+                    var humanReadableThinking = GenerateHumanReadableThinking(classifiedIntent);
                     yield return new UnifiedStreamingChunk
                     {
-                        Type = StreamingChunkType.Reasoning,
-                        Content = $"⚠️ {thoughtChain.FinalDecision.ConfirmationReason}\n",
-                        Metadata = new Dictionary<string, object>
-                        {
-                            ["requiresConfirmation"] = true,
-                        },
+                        Type = StreamingChunkType.Thinking,
+                        Content = humanReadableThinking,
                     };
                 }
             }
@@ -241,12 +234,20 @@ public partial class MasterOrchestrator
             }
             else
             {
-                // Stream text response using intelligent pipeline
+                // Use Swarm pattern for ALL text requests (single or multi-agent)
+                // The LLM naturally decides which sub-agents to call based on the request
+                // This replaces the complex composite/single agent branching logic
+                _logger.LogInformation(
+                    "Swarm execution for: {Intent}, classified agents: {Agents}",
+                    classifiedIntent.PrimaryIntent,
+                    string.Join(", ", classifiedIntent.RequiredSubAgents)
+                );
+
                 await foreach (
-                    var chunk in StreamByStrategyAsync(
+                    var chunk in StreamSwarmAsync(
+                        message,
                         classifiedIntent,
                         request.ConversationId,
-                        context,
                         request.EnableThinking,
                         effectiveCancellation
                     )
@@ -278,6 +279,34 @@ public partial class MasterOrchestrator
                         Summary = classifiedIntent.IntentSummary,
                         FoundAt = DateTime.UtcNow,
                     }
+                );
+            }
+
+            // Detect if the response is asking for information and create pending action
+            var responseText = fullResponse.ToString();
+            _logger.LogDebug(
+                "Analyzing response for pending actions. Response length: {Length}, First 200 chars: {Preview}",
+                responseText.Length,
+                responseText.Length > 200 ? responseText[..200] : responseText
+            );
+
+            var pendingAction = DetectPendingActionFromResponse(responseText, classifiedIntent);
+            if (pendingAction != null)
+            {
+                await _contextStore.AddPendingActionAsync(request.ConversationId, pendingAction);
+                _logger.LogInformation(
+                    "✅ Created pending action for {ConversationId}: Description='{Action}', RequiredAgent='{Agent}', EntityType='{EntityType}'",
+                    request.ConversationId,
+                    pendingAction.Description,
+                    pendingAction.RequiredAgent,
+                    pendingAction.Parameters.GetValueOrDefault("entityType", "unknown")
+                );
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "No pending action detected for {ConversationId}",
+                    request.ConversationId
                 );
             }
 
@@ -338,192 +367,5 @@ public partial class MasterOrchestrator
             DelegationEventMiddleware.CleanupConversation(request.ConversationId);
             DelegationEventMiddleware.CurrentConversationId = null;
         }
-    }
-
-    /// <summary>
-    /// Stream response based on the determined execution strategy.
-    /// Yields delegation events BEFORE content as they occur during tool execution.
-    /// </summary>
-    private async IAsyncEnumerable<UnifiedStreamingChunk> StreamByStrategyAsync(
-        UserIntent intent,
-        string conversationId,
-        ConversationContext context,
-        bool enableThinking,
-        [EnumeratorCancellation] CancellationToken cancellationToken
-    )
-    {
-        // Get or create thread for conversation history
-        var thread = _threadManager.GetOrCreateThread(conversationId, _masterAgent.Value);
-
-        // Build the message with context briefing for complex requests
-        var briefing = await _contextStore.GenerateSubAgentBriefingAsync(
-            conversationId,
-            intent.RequiredSubAgents.FirstOrDefault() ?? "MasterAgent",
-            intent
-        );
-
-        var briefingString = briefing.ToPromptString();
-        var enrichedMessage = !string.IsNullOrEmpty(briefingString)
-            ? $"{briefingString}\n\n{intent.IntentSummary}"
-            : intent.IntentSummary;
-
-        // Clear any stale events from previous requests (shouldn't be any, but just in case)
-        while (DelegationEventMiddleware.TryGetNextEvent(conversationId, out _))
-        {
-            // Just clearing stale events
-        }
-
-        // Use a flag to track if we've yielded first content
-        var isFirstContent = true;
-
-        // CRITICAL: Re-set conversation ID right before streaming
-        // This ensures it's set even if there were async context switches
-        DelegationEventMiddleware.CurrentConversationId = conversationId;
-
-        Console.WriteLine(
-            $"🚀 STARTING STREAM [{DateTime.UtcNow:HH:mm:ss.fff}]: Beginning agent streaming for {conversationId}, CurrentConversationId={DelegationEventMiddleware.CurrentConversationId}"
-        );
-
-        // Stream from the agent - tools execute during this call
-        // NOTE: Delegation events are pushed directly via SignalR for real-time delivery,
-        // so we don't yield them here (that would cause duplicates)
-        await foreach (var chunk in _masterAgent.Value.RunStreamingAsync(enrichedMessage, thread))
-        {
-            // Drain events from queue to clear them (they were already sent via SignalR)
-            // This prevents memory buildup in the event queue
-            if (isFirstContent && chunk.Text != null)
-            {
-                isFirstContent = false;
-                // Just clear the queue - events already sent via SignalR
-                while (DelegationEventMiddleware.TryGetNextEvent(conversationId, out _))
-                {
-                    // Events already pushed via SignalR, just clearing queue
-                }
-            }
-
-            // Clear any events that arrived between chunks
-            while (DelegationEventMiddleware.TryGetNextEvent(conversationId, out _))
-            {
-                // Events already pushed via SignalR, just clearing queue
-            }
-
-            // Yield content only
-            if (chunk.Text != null)
-            {
-                yield return new UnifiedStreamingChunk
-                {
-                    Type = StreamingChunkType.Content,
-                    Content = chunk.Text,
-                };
-            }
-        }
-
-        // Clear any final events after streaming completes
-        while (DelegationEventMiddleware.TryGetNextEvent(conversationId, out _))
-        {
-            // Events already pushed via SignalR, just clearing queue
-        }
-    }
-
-    /// <summary>
-    /// Stream multi-modal response
-    /// </summary>
-    private async IAsyncEnumerable<UnifiedStreamingChunk> StreamMultiModalAsync(
-        List<AIContent> contents,
-        string conversationId,
-        bool enableThinking,
-        [EnumeratorCancellation] CancellationToken cancellationToken
-    )
-    {
-        var thread = _threadManager.GetOrCreateThread(conversationId, _masterAgent.Value);
-        var chatMessage = new ChatMessage(ChatRole.User, contents);
-
-        await foreach (var update in _masterAgent.Value.RunStreamingAsync(chatMessage, thread))
-        {
-            if (update.Contents is { Count: > 0 })
-            {
-                foreach (var contentItem in update.Contents)
-                {
-                    if (contentItem is TextContent textContent)
-                    {
-                        yield return new UnifiedStreamingChunk
-                        {
-                            Type = StreamingChunkType.Content,
-                            Content = textContent.Text,
-                        };
-                    }
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Convert delegation event to unified streaming chunk
-    /// </summary>
-    private static UnifiedStreamingChunk ConvertDelegationToUnifiedChunk(DelegationEvent evt)
-    {
-        return new UnifiedStreamingChunk
-        {
-            Type = evt.Type switch
-            {
-                DelegationEventType.SubAgentDelegationStart =>
-                    StreamingChunkType.SubAgentDelegation,
-                DelegationEventType.SubAgentDelegationComplete =>
-                    StreamingChunkType.SubAgentComplete,
-                DelegationEventType.ToolExecutionStart => StreamingChunkType.ToolExecution,
-                DelegationEventType.ToolExecutionComplete => StreamingChunkType.ToolExecution,
-                _ => StreamingChunkType.Content,
-            },
-            SubAgentName = evt.SubAgentName,
-            ToolName = evt.ToolName,
-            Content = evt.Result,
-            Metadata = new Dictionary<string, object>
-            {
-                ["eventType"] = evt.Type.ToString(),
-                ["timestamp"] = evt.Timestamp,
-            },
-        };
-    }
-
-    /// <summary>
-    /// Restore prior messages to context (for conversation continuity)
-    /// </summary>
-    private async Task RestorePriorMessagesAsync(
-        string conversationId,
-        IEnumerable<ConversationMessage> priorMessages
-    )
-    {
-        foreach (var msg in priorMessages)
-        {
-            if (msg.Role == "assistant" && !string.IsNullOrEmpty(msg.SubAgentName))
-            {
-                await _contextStore.AddSubAgentFindingAsync(
-                    conversationId,
-                    new SubAgentFinding
-                    {
-                        SubAgentName = msg.SubAgentName,
-                        Summary =
-                            msg.Content.Length > 200 ? msg.Content[..200] + "..." : msg.Content,
-                        FoundAt = DateTime.UtcNow,
-                    }
-                );
-            }
-        }
-    }
-
-    /// <summary>
-    /// Extract transcription from multi-modal contents if available
-    /// </summary>
-    private static string? ExtractTranscriptionFromContents(List<AIContent> contents)
-    {
-        var textContent = contents.OfType<TextContent>().FirstOrDefault();
-        if (
-            textContent?.AdditionalProperties?.TryGetValue("transcription", out var transcription)
-            == true
-        )
-        {
-            return transcription?.ToString();
-        }
-        return null;
     }
 }

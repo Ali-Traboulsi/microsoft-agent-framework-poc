@@ -14,8 +14,10 @@ namespace AgentFrameworkQuickStart.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-public class StreamController(MasterOrchestrator orchestrator, ILogger<StreamController> logger)
-    : ControllerBase
+public class StreamController(
+    MasterOrchestratorHelper orchestrator,
+    ILogger<StreamController> logger
+) : ControllerBase
 {
     /// <summary>
     /// Stream chat response using Server-Sent Events.
