@@ -124,10 +124,29 @@ export const MasterAgentChat: React.FC = () => {
             workflowSteps: [newStep],
           };
           
-          const agentMsgIdx = prev.findIndex(m => m.type === 'agent' || m.type === 'multimodal');
-          if (agentMsgIdx >= 0) {
+          // Find the last user message - workflow progress should appear AFTER it
+          let lastUserIndex = -1;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].type === 'user') {
+              lastUserIndex = i;
+              break;
+            }
+          }
+          
+          // Find agent message ONLY after the last user message (current request's response)
+          let agentMsgIdx = -1;
+          for (let i = prev.length - 1; i > lastUserIndex; i--) {
+            if (prev[i].type === 'agent' || prev[i].type === 'multimodal') {
+              agentMsgIdx = i;
+              break;
+            }
+          }
+          
+          // Insert before agent message if one exists for current request
+          if (agentMsgIdx >= 0 && agentMsgIdx > lastUserIndex) {
             return [...prev.slice(0, agentMsgIdx), newWorkflowMsg, ...prev.slice(agentMsgIdx)];
           }
+          // Otherwise append at end (after user message)
           return [...prev, newWorkflowMsg];
         });
       } else {
@@ -187,10 +206,20 @@ export const MasterAgentChat: React.FC = () => {
       
       flushSync(() => {
         setMessages(prev => {
+          // Find the last user message index - we only want to add tool-calls AFTER this
+          let lastUserIndex = -1;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].type === 'user') {
+              lastUserIndex = i;
+              break;
+            }
+          }
+          
+          // Find tool-calls message ONLY after the last user message (belongs to current request)
           let toolCallsIndex = -1;
           let lastAgentIndex = -1;
           
-          for (let i = prev.length - 1; i >= 0; i--) {
+          for (let i = prev.length - 1; i > lastUserIndex; i--) {
             if (prev[i].type === 'tool-calls' && toolCallsIndex === -1) toolCallsIndex = i;
             if (prev[i].type === 'agent' && lastAgentIndex === -1) lastAgentIndex = i;
           }
@@ -204,13 +233,15 @@ export const MasterAgentChat: React.FC = () => {
               startTime: new Date(),
             };
             
-            if (toolCallsIndex >= 0) {
+            // Only append to existing tool-calls if it's AFTER the last user message
+            if (toolCallsIndex >= 0 && toolCallsIndex > lastUserIndex) {
               const updated = [...prev];
               const existingMessage = { ...updated[toolCallsIndex] };
               existingMessage.toolCalls = [...(existingMessage.toolCalls || []), newToolCall];
               updated[toolCallsIndex] = existingMessage;
               return updated;
             } else {
+              // Create new tool-calls message for this request
               const newMessage: ChatMessage = {
                 id: `msg-tool-calls-${Date.now()}`,
                 type: 'tool-calls',
@@ -219,16 +250,19 @@ export const MasterAgentChat: React.FC = () => {
                 toolCalls: [newToolCall],
               };
               
-              if (lastAgentIndex >= 0) {
+              // Insert before agent message if one exists for current request
+              if (lastAgentIndex >= 0 && lastAgentIndex > lastUserIndex) {
                 const result = [...prev];
                 result.splice(lastAgentIndex, 0, newMessage);
                 return result;
               }
+              // Otherwise just append after user message
               return [...prev, newMessage];
             }
           }
           
-          if (isCompleteEvent && toolCallsIndex >= 0) {
+          // Only update tool-calls that belong to current request
+          if (isCompleteEvent && toolCallsIndex >= 0 && toolCallsIndex > lastUserIndex) {
             const updated = [...prev];
             const existingMessage = { ...updated[toolCallsIndex] };
             existingMessage.toolCalls = (existingMessage.toolCalls || []).map(tc => {

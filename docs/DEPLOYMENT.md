@@ -70,11 +70,11 @@ docker-compose down
 ```bash
 # Build backend
 cd apps/backend
-docker build -t agent-backend:latest .
+docker build --no-cache -t agent-backend:latest .
 
 # Build frontend
 cd ../frontend
-docker build -t agent-frontend:latest \
+docker build --no-cache -t agent-frontend:latest \
   --build-arg VITE_API_URL=https://your-backend-url.com .
 ```
 

@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using AgentFrameworkQuickStart.Api.Abstractions;
+using AgentFrameworkQuickStart.Api.Middleware;
 using AgentFrameworkQuickStart.Core.Domain.Intelligence;
 using Microsoft.Extensions.AI;
 
@@ -140,17 +141,50 @@ public partial class MasterOrchestrator
                 foreach (var toolCall in toolCalls)
                 {
                     var agentName = ExtractAgentNameFromTool(toolCall.Name);
+                    var toolName = toolCall.Name;
+                    var isWebSearch = toolName.Equals(
+                        "SearchWeb",
+                        StringComparison.OrdinalIgnoreCase
+                    );
+                    var displayName = isWebSearch ? "WebSearch" : agentName;
+                    var toolStartTime = DateTime.UtcNow;
 
-                    // Emit delegation event
-                    if (!string.IsNullOrEmpty(agentName) && !agentsUsed.Contains(agentName))
+                    // Emit delegation event (streaming + SignalR) for sub-agents and web search
+                    if (!string.IsNullOrEmpty(displayName) && !agentsUsed.Contains(displayName))
                     {
-                        agentsUsed.Add(agentName);
+                        agentsUsed.Add(displayName);
+
+                        // Yield for streaming response
                         yield return new UnifiedStreamingChunk
                         {
-                            Type = StreamingChunkType.SubAgentDelegation,
-                            SubAgentName = agentName,
-                            Content = enableThinking ? $"Consulting {agentName}...\n" : null,
+                            Type = isWebSearch
+                                ? StreamingChunkType.ToolExecution
+                                : StreamingChunkType.SubAgentDelegation,
+                            SubAgentName = isWebSearch ? null : agentName,
+                            ToolName = isWebSearch ? "SearchWeb" : null,
+                            Content = enableThinking
+                                ? (
+                                    isWebSearch
+                                        ? "🔍 Searching the web...\n"
+                                        : $"Consulting {agentName}...\n"
+                                )
+                                : null,
                         };
+
+                        // Push to SignalR for real-time UI update
+                        await _delegationNotifier.NotifyAsync(
+                            conversationId,
+                            new DelegationEvent
+                            {
+                                Type = isWebSearch
+                                    ? DelegationEventType.ToolExecutionStart
+                                    : DelegationEventType.SubAgentDelegationStart,
+                                SubAgentName = isWebSearch ? null : agentName,
+                                ToolName = isWebSearch ? "SearchWeb" : null,
+                                FunctionName = toolCall.Name,
+                                Timestamp = toolStartTime,
+                            }
+                        );
                     }
 
                     // Execute the tool
@@ -167,6 +201,25 @@ public partial class MasterOrchestrator
                     {
                         _logger.LogError(ex, "Tool execution failed: {Tool}", toolCall.Name);
                         result = $"Error: {ex.Message}";
+
+                        // Push error event to SignalR
+                        if (!string.IsNullOrEmpty(displayName))
+                        {
+                            await _delegationNotifier.NotifyAsync(
+                                conversationId,
+                                new DelegationEvent
+                                {
+                                    Type = isWebSearch
+                                        ? DelegationEventType.ToolExecutionError
+                                        : DelegationEventType.SubAgentDelegationError,
+                                    SubAgentName = isWebSearch ? null : agentName,
+                                    ToolName = isWebSearch ? "SearchWeb" : null,
+                                    FunctionName = toolCall.Name,
+                                    Error = ex.Message,
+                                    Timestamp = DateTime.UtcNow,
+                                }
+                            );
+                        }
                     }
 
                     _logger.LogInformation(
@@ -179,15 +232,44 @@ public partial class MasterOrchestrator
                         new FunctionResultContent(toolCall.CallId ?? toolCall.Name, result)
                     );
 
-                    // Emit completion event
-                    if (!string.IsNullOrEmpty(agentName))
+                    // Emit completion event (streaming + SignalR)
+                    if (!string.IsNullOrEmpty(displayName))
                     {
+                        var durationMs = (long)(DateTime.UtcNow - toolStartTime).TotalMilliseconds;
+
+                        // Yield for streaming response
                         yield return new UnifiedStreamingChunk
                         {
-                            Type = StreamingChunkType.SubAgentComplete,
-                            SubAgentName = agentName,
-                            Content = enableThinking ? $"✓ {agentName} completed\n" : null,
+                            Type = isWebSearch
+                                ? StreamingChunkType.StepComplete
+                                : StreamingChunkType.SubAgentComplete,
+                            SubAgentName = isWebSearch ? null : agentName,
+                            ToolName = isWebSearch ? "SearchWeb" : null,
+                            Content = enableThinking
+                                ? (
+                                    isWebSearch
+                                        ? "✓ Web search completed\n"
+                                        : $"✓ {agentName} completed\n"
+                                )
+                                : null,
                         };
+
+                        // Push to SignalR for real-time UI update
+                        await _delegationNotifier.NotifyAsync(
+                            conversationId,
+                            new DelegationEvent
+                            {
+                                Type = isWebSearch
+                                    ? DelegationEventType.ToolExecutionComplete
+                                    : DelegationEventType.SubAgentDelegationComplete,
+                                SubAgentName = isWebSearch ? null : agentName,
+                                ToolName = isWebSearch ? "SearchWeb" : null,
+                                FunctionName = toolCall.Name,
+                                Result = result.Length > 200 ? result[..200] + "..." : result,
+                                StepDurationMs = durationMs,
+                                Timestamp = DateTime.UtcNow,
+                            }
+                        );
                     }
                 }
 
@@ -313,6 +395,7 @@ public partial class MasterOrchestrator
     {
         var tools = new List<AITool>();
 
+        // Add sub-agent tools
         foreach (var agent in _subAgents)
         {
             var capturedAgent = agent;
@@ -348,11 +431,20 @@ public partial class MasterOrchestrator
             tools.Add(AIFunctionFactory.Create(InvokeAgent, toolName, toolDescription));
         }
 
+        // Add Web Search tool for real-time information
+        tools.Add(
+            AIFunctionFactory.Create(
+                _webSearchTools.SearchWeb,
+                "SearchWeb",
+                "Search the web for current, real-time information. Use for: market trends, news, current events, latest data, stock prices, anything requiring up-to-date information from the internet."
+            )
+        );
+
         return tools;
     }
 
     /// <summary>
-    /// Execute a sub-agent tool call
+    /// Execute a sub-agent tool call or other tools like SearchWeb
     /// </summary>
     private async Task<string> ExecuteSubAgentToolAsync(
         FunctionCallContent toolCall,
@@ -362,10 +454,23 @@ public partial class MasterOrchestrator
     {
         var toolName = toolCall.Name;
 
-        _logger.LogDebug("Executing sub-agent tool: {Tool}", toolName);
+        _logger.LogDebug("Executing tool: {Tool}", toolName);
 
         try
         {
+            // Handle Web Search tool
+            if (toolName.Equals("SearchWeb", StringComparison.OrdinalIgnoreCase))
+            {
+                var query = ExtractSearchQueryFromToolArgs(toolCall.Arguments);
+                var count = ExtractSearchCountFromToolArgs(toolCall.Arguments);
+
+                _logger.LogInformation("🔍 Executing web search: {Query}", query);
+
+                var result = await _webSearchTools.SearchWeb(query, count);
+                return result;
+            }
+
+            // Handle sub-agent tools
             if (toolName.StartsWith("ask_"))
             {
                 var agentKey = toolName[4..].Replace("_", "");
@@ -390,6 +495,62 @@ public partial class MasterOrchestrator
             _logger.LogError(ex, "Tool execution error: {Tool}", toolName);
             return $"Error: {ex.Message}";
         }
+    }
+
+    /// <summary>
+    /// Extract search query from tool arguments
+    /// </summary>
+    private static string ExtractSearchQueryFromToolArgs(IDictionary<string, object?>? args)
+    {
+        if (args == null)
+            return "latest news";
+
+        // Try common parameter names for search
+        foreach (var key in new[] { "query", "searchQuery", "q", "search" })
+        {
+            if (args.TryGetValue(key, out var value) && value != null)
+            {
+                if (value is string s)
+                    return s;
+                if (value is JsonElement je && je.ValueKind == JsonValueKind.String)
+                    return je.GetString() ?? "latest news";
+            }
+        }
+
+        // Try first string argument
+        foreach (var value in args.Values)
+        {
+            if (value is string s && !string.IsNullOrEmpty(s))
+                return s;
+            if (value is JsonElement je && je.ValueKind == JsonValueKind.String)
+                return je.GetString() ?? "latest news";
+        }
+
+        return "latest news";
+    }
+
+    /// <summary>
+    /// Extract search count from tool arguments
+    /// </summary>
+    private static int ExtractSearchCountFromToolArgs(IDictionary<string, object?>? args)
+    {
+        if (args == null)
+            return 5;
+
+        foreach (var key in new[] { "count", "limit", "num", "maxResults" })
+        {
+            if (args.TryGetValue(key, out var value) && value != null)
+            {
+                if (value is int i)
+                    return Math.Min(i, 10);
+                if (value is long l)
+                    return Math.Min((int)l, 10);
+                if (value is JsonElement je && je.ValueKind == JsonValueKind.Number)
+                    return Math.Min(je.GetInt32(), 10);
+            }
+        }
+
+        return 5;
     }
 
     /// <summary>
