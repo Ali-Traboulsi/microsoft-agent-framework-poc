@@ -80,12 +80,13 @@ public class AppDbContext : DbContext
             entity.HasIndex(e => e.Timestamp);
             entity.HasIndex(e => new { e.ConversationId, e.SequenceNumber });
 
-            // Optional relationship with ChatThread
+            // Optional relationship with ChatThread via ThreadId (not ConversationId)
             entity
                 .HasOne(e => e.Thread)
                 .WithMany()
-                .HasForeignKey(e => e.ConversationId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .HasForeignKey(e => e.ThreadId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // Configure ConversationContextEntity

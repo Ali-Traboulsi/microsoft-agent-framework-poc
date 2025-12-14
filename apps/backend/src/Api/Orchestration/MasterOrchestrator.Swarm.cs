@@ -139,12 +139,31 @@ public partial class MasterOrchestrator
         var userChatMessage = BuildUserChatMessage(userMessage, multiModalContents);
         history.Messages.Add(userChatMessage);
 
+        // Log detailed multimodal info for debugging
+        if (multiModalContents?.Count > 0)
+        {
+            foreach (var content in multiModalContents)
+            {
+                var contentType = content.GetType().Name;
+                var contentInfo = content switch
+                {
+                    DataContent dc =>
+                        $"DataContent(MediaType={dc.MediaType}, DataLength={dc.Data.Length})",
+                    TextContent tc => $"TextContent(Length={tc.Text?.Length ?? 0})",
+                    UriContent uc => $"UriContent(Uri={uc.Uri})",
+                    _ => contentType,
+                };
+                _logger.LogInformation("📎 Multimodal content: {ContentInfo}", contentInfo);
+            }
+        }
+
         _logger.LogInformation(
-            "🔄 Swarm START: ConversationId={ConversationId}, Message='{Message}', HistoryCount={Count}, HasMultiModal={HasMultiModal}",
+            "🔄 Swarm START: ConversationId={ConversationId}, Message='{Message}', HistoryCount={Count}, HasMultiModal={HasMultiModal}, MultiModalCount={MultiModalCount}",
             conversationId,
             userMessage.Length > 80 ? userMessage[..80] + "..." : userMessage,
             history.Messages.Count,
-            multiModalContents?.Count > 0
+            multiModalContents?.Count > 0,
+            multiModalContents?.Count ?? 0
         );
 
         // Sanitize history - remove any incomplete tool call sequences

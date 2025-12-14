@@ -236,41 +236,137 @@ public partial class MasterOrchestrator
 
         foreach (var attachment in attachments)
         {
-            switch (attachment.Type.ToLowerInvariant())
+            try
             {
-                case "image":
-                    if (!string.IsNullOrEmpty(attachment.Data))
-                    {
-                        // Reconstruct image from base64
-                        var imageBytes = Convert.FromBase64String(attachment.Data);
-                        contents.Add(new DataContent(imageBytes, attachment.MediaType));
-                    }
-                    else if (!string.IsNullOrEmpty(attachment.Url))
-                    {
-                        // Image from URL
-                        contents.Add(new UriContent(new Uri(attachment.Url), attachment.MediaType));
-                    }
-                    break;
+                switch (attachment.Type.ToLowerInvariant())
+                {
+                    case "image":
+                        if (!string.IsNullOrEmpty(attachment.Data))
+                        {
+                            // Handle both data URI format and raw base64
+                            var imageContent = CreateDataContentFromString(
+                                attachment.Data,
+                                attachment.MediaType
+                            );
+                            if (imageContent != null)
+                                contents.Add(imageContent);
+                        }
+                        else if (!string.IsNullOrEmpty(attachment.Url))
+                        {
+                            // Image from URL
+                            contents.Add(
+                                new UriContent(new Uri(attachment.Url), attachment.MediaType)
+                            );
+                        }
+                        break;
 
-                case "audio":
-                    // For audio, we store the transcription as text context
-                    if (!string.IsNullOrEmpty(attachment.Transcription))
-                    {
+                    case "audio":
+                        // For audio, we store the transcription as text context
+                        if (!string.IsNullOrEmpty(attachment.Transcription))
+                        {
+                            contents.Add(
+                                new TextContent(
+                                    $"[Audio transcription: {attachment.Transcription}]"
+                                )
+                            );
+                        }
+                        break;
+
+                    case "document":
+                    case "file":
+                        // For documents, add a description (we can't restore binary content reliably)
+                        var fileName = attachment.FileName ?? "document";
                         contents.Add(
-                            new TextContent($"[Audio transcription: {attachment.Transcription}]")
+                            new TextContent(
+                                $"[Previously attached document: {fileName} ({attachment.MediaType})]"
+                            )
                         );
-                    }
-                    break;
+                        break;
 
-                case "document":
-                    // For documents, add a description
-                    var fileName = attachment.FileName ?? "document";
-                    contents.Add(new TextContent($"[Attached document: {fileName}]"));
-                    break;
+                    default:
+                        // Unknown type - add as text description
+                        contents.Add(
+                            new TextContent(
+                                $"[Attachment: {attachment.Type} - {attachment.FileName ?? "unnamed"}]"
+                            )
+                        );
+                        break;
+                }
+            }
+            catch (Exception)
+            {
+                // If we can't restore the attachment, add a text placeholder
+                contents.Add(
+                    new TextContent(
+                        $"[Could not restore {attachment.Type} attachment: {attachment.FileName ?? "unnamed"}]"
+                    )
+                );
             }
         }
 
         return contents;
+    }
+
+    /// <summary>
+    /// Create DataContent from a string that might be base64 or a data URI
+    /// </summary>
+    private static DataContent? CreateDataContentFromString(string data, string mediaType)
+    {
+        try
+        {
+            // Check if it's a data URI format (data:mediatype;base64,XXXX)
+            if (data.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                // Use DataContent constructor that accepts data URI
+                return new DataContent(data, mediaType);
+            }
+
+            // Check if it looks like valid base64
+            // Base64 should only contain A-Z, a-z, 0-9, +, /, and = for padding
+            var isValidBase64 = IsValidBase64(data);
+            if (isValidBase64)
+            {
+                var bytes = Convert.FromBase64String(data);
+                return new DataContent(bytes, mediaType);
+            }
+
+            // If it's neither, return null
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Check if a string appears to be valid base64
+    /// </summary>
+    private static bool IsValidBase64(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return false;
+
+        // Base64 length must be divisible by 4
+        if (input.Length % 4 != 0)
+            return false;
+
+        // Check for valid base64 characters
+        foreach (var c in input)
+        {
+            if (
+                !char.IsLetterOrDigit(c)
+                && c != '+'
+                && c != '/'
+                && c != '='
+                && !char.IsWhiteSpace(c)
+            )
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

@@ -3,15 +3,22 @@ namespace AgentFrameworkQuickStart.Models;
 /// <summary>
 /// Represents a memory entry from a sub-agent interaction within a conversation.
 /// This is used to share context across different sub-agents in the same conversation.
+/// Note: ConversationId is a session identifier, NOT a foreign key to ChatThread.
 /// </summary>
 public class ConversationMemoryEntry
 {
     public Guid Id { get; set; }
 
     /// <summary>
-    /// The conversation ID this memory belongs to (matches ChatThread.Id)
+    /// The conversation/session ID this memory belongs to.
+    /// This is an arbitrary GUID used for session tracking, not a FK to ChatThread.
     /// </summary>
     public Guid ConversationId { get; set; }
+
+    /// <summary>
+    /// Optional reference to a ChatThread (if the conversation is thread-based)
+    /// </summary>
+    public Guid? ThreadId { get; set; }
 
     /// <summary>
     /// The name of the sub-agent that handled this interaction
