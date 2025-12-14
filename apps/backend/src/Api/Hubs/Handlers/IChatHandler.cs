@@ -3,40 +3,20 @@ using AgentFrameworkQuickStart.Api.DTOs;
 namespace AgentFrameworkQuickStart.Api.Hubs.Handlers;
 
 /// <summary>
-/// Interface for chat stream handlers
-/// All processing uses intelligent mode by default
+/// Unified interface for all chat types with thread-based persistence.
+/// Consolidates text and multimodal chat with consistent memory and conversation tracking.
 /// </summary>
-public interface IChatHandler
+public interface IUnifiedChatHandler
 {
+    /// <summary>
+    /// Stream chat responses with thread persistence.
+    /// Handles both text-only and multimodal requests uniformly.
+    /// </summary>
+    /// <param name="request">Unified request containing text and/or multimodal content</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Async stream of chat responses</returns>
     IAsyncEnumerable<MasterStreamingResponse> StreamAsync(
-        string message,
-        string conversationId,
-        bool enableThinking,
-        CancellationToken cancellationToken
-    );
-}
-
-/// <summary>
-/// Interface for multi-modal chat handlers
-/// </summary>
-public interface IMultiModalChatHandler
-{
-    IAsyncEnumerable<MasterStreamingResponse> StreamAsync(
-        MultiModalChatRequest request,
-        CancellationToken cancellationToken
-    );
-}
-
-/// <summary>
-/// Interface for threaded chat handlers
-/// </summary>
-public interface IThreadedChatHandler
-{
-    IAsyncEnumerable<MasterStreamingResponse> StreamAsync(
-        string message,
-        string? threadIdStr,
-        string? conversationId,
-        bool enableThinking,
+        UnifiedThreadedChatRequest request,
         CancellationToken cancellationToken
     );
 }

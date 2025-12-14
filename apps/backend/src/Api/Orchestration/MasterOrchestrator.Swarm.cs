@@ -32,7 +32,8 @@ public partial class MasterOrchestrator
         UserIntent intent,
         string conversationId,
         bool enableThinking,
-        [EnumeratorCancellation] CancellationToken cancellationToken
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        List<AIContent>? multiModalContents = null
     )
     {
         var history = GetOrCreateSwarmHistory(conversationId);
@@ -134,14 +135,16 @@ public partial class MasterOrchestrator
             );
         }
 
-        // Add user message to history
-        history.Messages.Add(new ChatMessage(ChatRole.User, userMessage));
+        // Add user message to history (with multimodal content if present)
+        var userChatMessage = BuildUserChatMessage(userMessage, multiModalContents);
+        history.Messages.Add(userChatMessage);
 
         _logger.LogInformation(
-            "🔄 Swarm START: ConversationId={ConversationId}, Message='{Message}', HistoryCount={Count}",
+            "🔄 Swarm START: ConversationId={ConversationId}, Message='{Message}', HistoryCount={Count}, HasMultiModal={HasMultiModal}",
             conversationId,
             userMessage.Length > 80 ? userMessage[..80] + "..." : userMessage,
-            history.Messages.Count
+            history.Messages.Count,
+            multiModalContents?.Count > 0
         );
 
         // Sanitize history - remove any incomplete tool call sequences
@@ -964,6 +967,43 @@ public partial class MasterOrchestrator
         {
             SwarmHistories.Remove(conversationId);
         }
+    }
+
+    /// <summary>
+    /// Build a user ChatMessage with optional multimodal content.
+    /// If multimodal contents are provided, includes images/audio alongside text.
+    /// </summary>
+    private static ChatMessage BuildUserChatMessage(
+        string textMessage,
+        List<AIContent>? multiModalContents
+    )
+    {
+        // If no multimodal content, just return a text message
+        if (multiModalContents == null || multiModalContents.Count == 0)
+        {
+            return new ChatMessage(ChatRole.User, textMessage);
+        }
+
+        // Build content list with both text and multimodal items
+        var contents = new List<AIContent>();
+
+        // Add text first if present
+        if (!string.IsNullOrWhiteSpace(textMessage))
+        {
+            contents.Add(new TextContent(textMessage));
+        }
+
+        // Add all multimodal contents (images, audio transcriptions, etc.)
+        foreach (var content in multiModalContents)
+        {
+            // Skip TextContent if we already added the text message (avoid duplication)
+            if (content is TextContent tc && tc.Text == textMessage)
+                continue;
+
+            contents.Add(content);
+        }
+
+        return new ChatMessage(ChatRole.User, contents);
     }
 
     /// <summary>

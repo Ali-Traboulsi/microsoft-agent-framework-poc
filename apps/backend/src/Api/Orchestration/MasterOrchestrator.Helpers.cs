@@ -146,15 +146,23 @@ public partial class MasterOrchestrator
     }
 
     /// <summary>
-    /// Restore prior messages to context (for conversation continuity)
+    /// Restore prior messages to context and Swarm history (for conversation continuity).
+    /// This restores both sub-agent findings AND the full conversation history including multimodal content.
     /// </summary>
     public async Task RestorePriorMessagesAsync(
         string conversationId,
         IEnumerable<ConversationMessage> priorMessages
     )
     {
-        foreach (var msg in priorMessages)
+        var messageList = priorMessages.ToList();
+        var history = GetOrCreateSwarmHistory(conversationId);
+
+        // Only restore if the Swarm history is empty (avoid duplicates on re-restore)
+        var shouldRestoreToSwarm = history.Messages.Count == 0;
+
+        foreach (var msg in messageList)
         {
+            // Restore sub-agent findings for context
             if (msg.Role == "assistant" && !string.IsNullOrEmpty(msg.SubAgentName))
             {
                 await _contextStore.AddSubAgentFindingAsync(
@@ -168,7 +176,101 @@ public partial class MasterOrchestrator
                     }
                 );
             }
+
+            // Restore to Swarm history for full conversation memory
+            if (shouldRestoreToSwarm)
+            {
+                var chatMessage = BuildRestoredChatMessage(msg);
+                history.Messages.Add(chatMessage);
+            }
         }
+
+        if (shouldRestoreToSwarm && history.Messages.Count > 0)
+        {
+            _logger.LogInformation(
+                "📚 Restored {Count} messages to Swarm history for conversation {ConversationId}",
+                history.Messages.Count,
+                conversationId
+            );
+        }
+    }
+
+    /// <summary>
+    /// Build a ChatMessage from a stored ConversationMessage, including multimodal attachments.
+    /// </summary>
+    private static ChatMessage BuildRestoredChatMessage(ConversationMessage msg)
+    {
+        var role = msg.Role.ToLowerInvariant() == "user" ? ChatRole.User : ChatRole.Assistant;
+
+        // If there are attachments, build multimodal message
+        if (msg.HasAttachments)
+        {
+            var contents = new List<AIContent>();
+
+            // Add text content first
+            if (!string.IsNullOrWhiteSpace(msg.Content))
+            {
+                contents.Add(new TextContent(msg.Content));
+            }
+
+            // Convert and add attachments (images, etc.)
+            var aiContents = ConvertAttachmentsToAIContent(msg.Attachments!);
+            contents.AddRange(aiContents);
+
+            return new ChatMessage(role, contents);
+        }
+
+        // Simple text message
+        return new ChatMessage(role, msg.Content);
+    }
+
+    /// <summary>
+    /// Convert serializable attachments back to AIContent for restoring conversation history.
+    /// This enables the LLM to "remember" images from previous messages.
+    /// </summary>
+    private static List<AIContent> ConvertAttachmentsToAIContent(
+        List<SerializableAttachment> attachments
+    )
+    {
+        var contents = new List<AIContent>();
+
+        foreach (var attachment in attachments)
+        {
+            switch (attachment.Type.ToLowerInvariant())
+            {
+                case "image":
+                    if (!string.IsNullOrEmpty(attachment.Data))
+                    {
+                        // Reconstruct image from base64
+                        var imageBytes = Convert.FromBase64String(attachment.Data);
+                        contents.Add(new DataContent(imageBytes, attachment.MediaType));
+                    }
+                    else if (!string.IsNullOrEmpty(attachment.Url))
+                    {
+                        // Image from URL
+                        contents.Add(new UriContent(new Uri(attachment.Url), attachment.MediaType));
+                    }
+                    break;
+
+                case "audio":
+                    // For audio, we store the transcription as text context
+                    if (!string.IsNullOrEmpty(attachment.Transcription))
+                    {
+                        contents.Add(
+                            new TextContent($"[Audio transcription: {attachment.Transcription}]")
+                        );
+                    }
+                    break;
+
+                case "document":
+                    // For documents, add a description
+                    var fileName = attachment.FileName ?? "document";
+                    contents.Add(new TextContent($"[Attached document: {fileName}]"));
+                    break;
+            }
+        }
+
+        return contents;
     }
 
     /// <summary>

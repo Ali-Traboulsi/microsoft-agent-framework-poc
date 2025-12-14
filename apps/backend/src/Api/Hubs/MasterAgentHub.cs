@@ -7,90 +7,37 @@ namespace AgentFrameworkQuickStart.Api.Hubs;
 
 /// <summary>
 /// SignalR hub for master orchestrator with streaming support.
-/// All chat requests now use intelligent processing by default (P0 Intelligence Layer).
-/// Note: For file uploads with streaming, use ChatStreamMultiModal with base64-encoded data.
+/// All chat requests use the unified handler with intelligent processing (Intelligence Layer).
+///
+/// Use ChatStreamUnified for all integrations - it handles both text and multimodal content
+/// with consistent thread-based memory and persistence.
+///
+/// Note: For file uploads with streaming, use ChatStreamUnified with base64-encoded data.
 /// For direct file uploads without streaming, use the HTTP endpoint /chat/multimodal/upload.
 /// </summary>
-public class MasterAgentHub(
-    IChatHandler chatHandler,
-    IMultiModalChatHandler multiModalHandler,
-    IThreadedChatHandler threadedHandler
-) : Hub
+public class MasterAgentHub(IUnifiedChatHandler unifiedHandler) : Hub
 {
     /// <summary>
-    /// Stream chat responses from the master orchestrator
-    /// Uses intelligent processing with intent classification and context management
+    /// Unified chat streaming that handles both text and multimodal content
+    /// with consistent thread-based persistence and memory.
     /// </summary>
-    public async IAsyncEnumerable<MasterStreamingResponse> ChatStream(
-        string message,
-        string conversationId,
-        bool enableThinking = false,
+    /// <param name="request">Unified request containing text and/or multimodal content</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Async stream of chat responses</returns>
+    public async IAsyncEnumerable<MasterStreamingResponse> ChatStreamUnified(
+        UnifiedThreadedChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default
     )
     {
-        await foreach (
-            var response in chatHandler.StreamAsync(
-                message,
-                conversationId,
-                enableThinking,
-                cancellationToken
-            )
-        )
+        await foreach (var response in unifiedHandler.StreamAsync(request, cancellationToken))
         {
             yield return response;
         }
     }
 
     /// <summary>
-    /// Stream multi-modal chat responses (text, images, audio, documents)
-    /// </summary>
-    public async IAsyncEnumerable<MasterStreamingResponse> ChatStreamMultiModal(
-        MultiModalChatRequest request,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default
-    )
-    {
-        await foreach (var response in multiModalHandler.StreamAsync(request, cancellationToken))
-        {
-            yield return response;
-        }
-    }
-
-    /// <summary>
-    /// Stream chat responses with thread persistence
-    /// </summary>
-    public async IAsyncEnumerable<MasterStreamingResponse> ChatStreamWithThread(
-        string message,
-        string? threadIdStr,
-        string? conversationId = null,
-        bool enableThinking = false,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default
-    )
-    {
-        await foreach (
-            var response in threadedHandler.StreamAsync(
-                message,
-                threadIdStr,
-                conversationId,
-                enableThinking,
-                cancellationToken
-            )
-        )
-        {
-            yield return response;
-        }
-    }
-
-    /// <summary>
-    /// Stream multi-modal chat with base64-encoded file data (alias for ChatStreamMultiModal)
-    /// </summary>
-    public IAsyncEnumerable<MasterStreamingResponse> ChatStreamMultiModalWithBase64(
-        MultiModalChatRequest request,
-        CancellationToken cancellationToken = default
-    ) => ChatStreamMultiModal(request, cancellationToken);
-
-    /// <summary>
-    /// Test method to verify SignalR workflow progress push works
-    /// Sends a test workflow progress event to all connected clients
+    /// Test method to verify SignalR workflow progress push works.
+    /// Sends a test workflow progress event to all connected clients.
     /// </summary>
     public async Task TestWorkflowProgress(string conversationId)
     {
@@ -107,7 +54,6 @@ public class MasterAgentHub(
             IsComplete = false,
         };
 
-        // Send to all clients using camelCase method name
         await Clients.All.SendAsync("receiveWorkflowProgress", conversationId, testResponse);
     }
 }

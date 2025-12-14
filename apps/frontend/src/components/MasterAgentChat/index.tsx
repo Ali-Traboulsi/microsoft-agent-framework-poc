@@ -2,8 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { ProjectionResult } from '../../interfaces/ProjectionResult.interface';
 import {
-  chatStreamMultiModal,
-  chatStreamWithThread,
+  chatStreamUnified,
   connect,
   disconnect,
   onDelegationEvent,
@@ -293,9 +292,41 @@ export const MasterAgentChat: React.FC = () => {
   const convertThreadMessagesToChatMessages = useCallback((threadMessages: ThreadMessage[]): ChatMessage[] => {
     const result: ChatMessage[] = [];
     const seenProjectionIds = new Set<string>();
+    const seenContentHashes = new Set<string>(); // Track duplicate assistant messages
+    
+    console.log('Converting thread messages:', threadMessages);
     
     for (const msg of threadMessages) {
-      const projectionResult = msg.metadata?.projectionResult as ProjectionResult | undefined;
+      // Skip duplicate assistant messages (same content + projectionId)
+      if (msg.role.toLowerCase() === 'assistant') {
+        const rawProj = msg.metadata?.projectionResult as Record<string, unknown> | undefined;
+        const projectionId = (rawProj?.projectionId || rawProj?.ProjectionId || '') as string;
+        const contentHash = `${msg.content.substring(0, 100)}-${projectionId}`;
+        if (seenContentHashes.has(contentHash)) {
+          console.log('Skipping duplicate assistant message:', msg.id);
+          continue;
+        }
+        seenContentHashes.add(contentHash);
+      }
+
+      // Extract projection result from metadata - handle nested structure
+      // Handle both camelCase (new) and PascalCase (legacy) property names
+      let projectionResult: ProjectionResult | undefined;
+      if (msg.metadata?.projectionResult) {
+        const raw = msg.metadata.projectionResult as Record<string, unknown>;
+        // Normalize property names to camelCase if needed
+        projectionResult = {
+          projectionId: (raw.projectionId || raw.ProjectionId) as string,
+          inputSummary: (raw.inputSummary || raw.InputSummary) as ProjectionResult['inputSummary'],
+          scenarios: (raw.scenarios || raw.Scenarios) as ProjectionResult['scenarios'],
+          recommendedFunds: (raw.recommendedFunds || raw.RecommendedFunds) as ProjectionResult['recommendedFunds'],
+          riskWarnings: (raw.riskWarnings || raw.RiskWarnings) as string[],
+          riskWarningsAr: (raw.riskWarningsAr || raw.RiskWarningsAr) as string[],
+          callToAction: (raw.callToAction || raw.CallToAction) as ProjectionResult['callToAction'],
+          metadata: (raw.metadata || raw.Metadata) as ProjectionResult['metadata'],
+        };
+        console.log('Found projection in message:', msg.id, projectionResult);
+      }
       
       result.push({
         id: msg.id,
@@ -307,8 +338,10 @@ export const MasterAgentChat: React.FC = () => {
         projectionResult: projectionResult,
       });
       
+      // Add separate projection card if we have projection data
       if (projectionResult?.projectionId && !seenProjectionIds.has(projectionResult.projectionId)) {
         seenProjectionIds.add(projectionResult.projectionId);
+        console.log('Adding projection card for:', projectionResult.projectionId);
         result.push({
           id: `${msg.id}-projection`,
           type: 'projection',
@@ -319,6 +352,7 @@ export const MasterAgentChat: React.FC = () => {
       }
     }
     
+    console.log('Converted messages:', result);
     return result;
   }, []);
 
@@ -372,12 +406,12 @@ export const MasterAgentChat: React.FC = () => {
     let accumulatedContent = '';
 
     try {
-      for await (const chunk of chatStreamWithThread(
-        userMessage, 
-        currentThreadId,
-        conversationId.current,
-        enableThinking
-      )) {
+      for await (const chunk of chatStreamUnified({
+        message: userMessage,
+        threadId: currentThreadId,
+        conversationId: conversationId.current,
+        enableThinking,
+      })) {
         if (chunk.type === 'ThreadCreated' && chunk.metadata?.threadId) {
           setCurrentThreadId(chunk.metadata.threadId as string);
           conversationId.current = chunk.metadata.threadId as string;
@@ -462,7 +496,13 @@ export const MasterAgentChat: React.FC = () => {
       if (userMessage.trim()) contents.push({ Type: 'text' as const, Text: userMessage });
       contents.push(...fileContents);
 
-      for await (const chunk of chatStreamMultiModal(contents, conversationId.current, currentThreadId, enableThinking)) {
+      for await (const chunk of chatStreamUnified({
+        message: userMessage.trim() || undefined,
+        contents,
+        conversationId: conversationId.current,
+        threadId: currentThreadId,
+        enableThinking,
+      })) {
         if (chunk.isComplete) {
           setTelemetry(buildTelemetryData(ctx, chunk.metadata?.traceId as string));
           break;
@@ -473,6 +513,7 @@ export const MasterAgentChat: React.FC = () => {
             if (chunk.metadata?.threadId) {
               setCurrentThreadId(chunk.metadata.threadId as string);
               conversationId.current = chunk.metadata.threadId as string;
+              setThreadRefreshTrigger(prev => prev + 1);
             }
             break;
 

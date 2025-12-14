@@ -12,58 +12,68 @@ using Microsoft.Extensions.AI;
 namespace AgentFrameworkQuickStart.Api.Hubs.Handlers;
 
 /// <summary>
-/// Handles multi-modal chat streaming with support for images, audio, and documents
+/// Unified chat handler that supports both text and multimodal content
+/// with consistent thread-based persistence and memory management.
 /// </summary>
-public class MultiModalChatHandler(
+public class UnifiedChatHandler(
     IMasterOrchestrator orchestrator,
     AudioTranscriptionService audioService,
     IServiceScopeFactory scopeFactory,
-    ILogger<MultiModalChatHandler> logger
-) : IMultiModalChatHandler
+    ILogger<UnifiedChatHandler> logger
+) : IUnifiedChatHandler
 {
+    private static readonly JsonSerializerOptions CamelCaseOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false,
+    };
+
     public async IAsyncEnumerable<MasterStreamingResponse> StreamAsync(
-        MultiModalChatRequest request,
+        UnifiedThreadedChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken
     )
     {
         // Validate request
-        var validationResult = ValidateRequest(request);
-        if (validationResult != null)
+        if (!request.HasContent)
         {
-            yield return validationResult;
+            yield return CreateErrorResponse("Request must include a message or content items");
             yield break;
         }
 
-        // Process contents and build AI content list
-        var aiContents = new List<AIContent>();
-        var contentDescriptions = new List<string>();
-
-        if (!string.IsNullOrEmpty(request.Message))
+        // Validate multimodal content if present
+        if (request.Contents?.Count > 0)
         {
-            aiContents.Add(new TextContent(request.Message));
-            contentDescriptions.Add(request.Message);
-        }
-
-        await foreach (var result in ProcessContentsAsync(request.Contents!, cancellationToken))
-        {
-            if (result.Response != null)
-                yield return result.Response;
-
-            if (result.Content != null)
+            foreach (var content in request.Contents)
             {
-                aiContents.Add(result.Content);
-                if (!string.IsNullOrEmpty(result.Description))
-                    contentDescriptions.Add(result.Description);
+                var (isValid, errorMessage) = ContentConverter.ValidateContentInput(content);
+                if (!isValid)
+                {
+                    yield return CreateErrorResponse(errorMessage ?? "Invalid content");
+                    yield break;
+                }
             }
         }
 
-        var conversationId = request.ConversationId ?? Guid.NewGuid().ToString();
+        // Process contents and build AI content list
+        var (aiContents, contentDescriptions, transcription) = await ProcessAllContentsAsync(
+            request,
+            cancellationToken
+        );
+
+        // Send any transcription responses
+        await foreach (
+            var transcriptionResponse in transcription.WithCancellation(cancellationToken)
+        )
+        {
+            yield return transcriptionResponse;
+        }
 
         // Initialize thread for persistence
         var threadContext = await InitializeThreadAsync(
             request.ThreadId,
             contentDescriptions,
-            request.Contents!,
+            request.Contents,
+            request.Message,
             cancellationToken
         );
 
@@ -79,11 +89,13 @@ public class MultiModalChatHandler(
             IsComplete = false,
         };
 
+        // Build unified request for orchestrator
+        var conversationId = request.ConversationId ?? threadContext.ThreadId.ToString();
         var unifiedRequest = new UnifiedChatRequest
         {
             ConversationId = conversationId,
             Message = request.Message,
-            Contents = aiContents,
+            Contents = aiContents.Count > 0 ? aiContents : null,
             PriorMessages =
                 threadContext.PriorMessages.Count > 0 ? threadContext.PriorMessages : null,
             EnableThinking = request.EnableThinking,
@@ -103,7 +115,7 @@ public class MultiModalChatHandler(
                     break;
 
                 responseCollector.Collect(chunk);
-                yield return ChatStreamHandler.MapChunkToStreamingResponse(chunk);
+                yield return MapChunkToStreamingResponse(chunk);
 
                 if (chunk.Type == StreamingChunkType.Complete)
                 {
@@ -135,10 +147,74 @@ public class MultiModalChatHandler(
         }
     }
 
+    private async Task<(
+        List<AIContent> aiContents,
+        List<string> descriptions,
+        IAsyncEnumerable<MasterStreamingResponse> transcriptions
+    )> ProcessAllContentsAsync(
+        UnifiedThreadedChatRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        var aiContents = new List<AIContent>();
+        var descriptions = new List<string>();
+        var transcriptionResponses = new List<MasterStreamingResponse>();
+
+        // Add text message if present
+        if (!string.IsNullOrWhiteSpace(request.Message))
+        {
+            aiContents.Add(new TextContent(request.Message));
+            descriptions.Add(request.Message);
+        }
+
+        // Process multimodal contents if present
+        if (request.Contents?.Count > 0)
+        {
+            foreach (var content in request.Contents)
+            {
+                if (IsAudioContent(content))
+                {
+                    var (aiContent, response, description) = await ProcessAudioContentAsync(
+                        content
+                    );
+                    if (aiContent != null)
+                        aiContents.Add(aiContent);
+                    if (response != null)
+                        transcriptionResponses.Add(response);
+                    if (!string.IsNullOrEmpty(description))
+                        descriptions.Add(description);
+                }
+                else
+                {
+                    var aiContent = ContentConverter.ConvertToAIContent(content);
+                    if (aiContent != null)
+                    {
+                        aiContents.Add(aiContent);
+                        var description = GenerateContentDescription(content);
+                        if (!string.IsNullOrEmpty(description))
+                            descriptions.Add(description);
+                    }
+                }
+            }
+        }
+
+        return (aiContents, descriptions, ToAsyncEnumerable(transcriptionResponses));
+    }
+
+    private static async IAsyncEnumerable<T> ToAsyncEnumerable<T>(IEnumerable<T> items)
+    {
+        foreach (var item in items)
+        {
+            yield return item;
+        }
+        await Task.CompletedTask;
+    }
+
     private async Task<ThreadContext> InitializeThreadAsync(
         string? threadIdStr,
         List<string> contentDescriptions,
-        List<ContentInput> contents,
+        List<ContentInput>? contents,
+        string? textMessage,
         CancellationToken cancellationToken
     )
     {
@@ -163,7 +239,7 @@ public class MultiModalChatHandler(
         }
         else
         {
-            var threadTitle = GenerateMultiModalThreadTitle(contentDescriptions, contents);
+            var threadTitle = GenerateThreadTitle(contentDescriptions, contents, textMessage);
             var thread = await unitOfWork.Threads.CreateAsync(
                 new ChatThread { Title = threadTitle },
                 cancellationToken
@@ -171,22 +247,32 @@ public class MultiModalChatHandler(
             actualThreadId = thread.Id;
         }
 
-        // Save user message with multi-modal content description
-        var userMessageContent = BuildUserMessageContent(contentDescriptions, contents);
+        // Save user message with attachments
+        var userMessageContent = BuildUserMessageContent(
+            contentDescriptions,
+            contents,
+            textMessage
+        );
+        var attachmentsJson = BuildAttachmentsJson(contents);
+
         await unitOfWork.Messages.AddAsync(
             new Models.ChatMessage
             {
                 ThreadId = actualThreadId,
                 Role = MessageRole.User,
                 Content = userMessageContent,
+                AttachmentsJson = attachmentsJson,
             },
             cancellationToken
         );
 
         logger.LogInformation(
-            "Multi-modal user message saved to thread {ThreadId}: {ContentPreview}",
+            "User message saved to thread {ThreadId}: ContentPreview={ContentPreview}, HasAttachments={HasAttachments}",
             actualThreadId,
-            userMessageContent.Length > 100 ? userMessageContent[..100] + "..." : userMessageContent
+            userMessageContent.Length > 100
+                ? userMessageContent[..100] + "..."
+                : userMessageContent,
+            !string.IsNullOrEmpty(attachmentsJson)
         );
 
         return new ThreadContext(actualThreadId, priorMessages);
@@ -213,29 +299,85 @@ public class MultiModalChatHandler(
                 Role = m.Role.ToString().ToLower(),
                 Content = m.Content,
                 SubAgentName = m.SubAgentName,
+                Attachments = DeserializeAttachments(m.AttachmentsJson),
             })
             .ToList();
     }
 
+    /// <summary>
+    /// Build JSON representation of multimodal attachments for database storage
+    /// </summary>
+    private static string? BuildAttachmentsJson(List<ContentInput>? contents)
+    {
+        if (contents == null || contents.Count == 0)
+            return null;
+
+        var attachments = contents
+            .Where(c => c.Type?.ToLowerInvariant() != "text")
+            .Select(c => new SerializableAttachment
+            {
+                Type = c.Type ?? "unknown",
+                MediaType = c.MediaType ?? "application/octet-stream",
+                Data = c.Data, // Base64 image data
+                Url = c.Uri, // ContentInput uses "Uri", SerializableAttachment uses "Url"
+                FileName = c.FileName,
+                Transcription = null, // Audio transcriptions are stored separately in content
+            })
+            .ToList();
+
+        if (attachments.Count == 0)
+            return null;
+
+        return JsonSerializer.Serialize(attachments, CamelCaseOptions);
+    }
+
+    /// <summary>
+    /// Deserialize attachments from JSON storage
+    /// </summary>
+    private static List<SerializableAttachment>? DeserializeAttachments(string? attachmentsJson)
+    {
+        if (string.IsNullOrEmpty(attachmentsJson))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<SerializableAttachment>>(
+                attachmentsJson,
+                CamelCaseOptions
+            );
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string BuildUserMessageContent(
         List<string> descriptions,
-        List<ContentInput> contents
+        List<ContentInput>? contents,
+        string? textMessage
     )
     {
         var sb = new StringBuilder();
 
-        // Add text descriptions
+        // Add main text message first if present
+        if (!string.IsNullOrWhiteSpace(textMessage))
+        {
+            sb.AppendLine(textMessage);
+        }
+
+        // Add other text descriptions (excluding main message to avoid duplication)
         foreach (var desc in descriptions)
         {
-            if (!string.IsNullOrWhiteSpace(desc))
+            if (!string.IsNullOrWhiteSpace(desc) && desc != textMessage)
             {
                 sb.AppendLine(desc);
             }
         }
 
-        // Add attachment summaries
-        var attachments = contents.Where(c => c.Type?.ToLowerInvariant() != "text").ToList();
-        if (attachments.Count > 0)
+        // Add attachment summaries for non-text content
+        var attachments = contents?.Where(c => c.Type?.ToLowerInvariant() != "text").ToList();
+        if (attachments?.Count > 0)
         {
             sb.AppendLine();
             sb.AppendLine("[Attachments:]");
@@ -251,35 +393,47 @@ public class MultiModalChatHandler(
         return sb.ToString().Trim();
     }
 
-    private static string GenerateMultiModalThreadTitle(
+    private static string GenerateThreadTitle(
         List<string> descriptions,
-        List<ContentInput> contents
+        List<ContentInput>? contents,
+        string? textMessage
     )
     {
-        // Try to use text content first
+        // Try text message first
+        if (!string.IsNullOrWhiteSpace(textMessage))
+        {
+            return TruncateTitle(textMessage);
+        }
+
+        // Try other descriptions
         var textContent = descriptions.FirstOrDefault(d => !string.IsNullOrWhiteSpace(d));
         if (!string.IsNullOrEmpty(textContent))
         {
-            var title = textContent.Length > 50 ? textContent[..50] + "..." : textContent;
-            var firstSentenceEnd = title.IndexOfAny(['.', '?', '!', '\n']);
-            if (firstSentenceEnd > 0 && firstSentenceEnd < title.Length - 3)
-                title = title[..(firstSentenceEnd + 1)];
-            return title.Trim();
+            return TruncateTitle(textContent);
         }
 
         // Fallback to describing attachments
         var attachmentTypes = contents
-            .Where(c => c.Type?.ToLowerInvariant() != "text")
+            ?.Where(c => c.Type?.ToLowerInvariant() != "text")
             .Select(c => c.Type?.ToLowerInvariant() ?? "file")
             .Distinct()
             .ToList();
 
-        if (attachmentTypes.Count > 0)
+        if (attachmentTypes?.Count > 0)
         {
             return $"Multi-modal: {string.Join(", ", attachmentTypes)}";
         }
 
-        return "Multi-modal conversation";
+        return "New Conversation";
+    }
+
+    private static string TruncateTitle(string content)
+    {
+        var title = content.Length > 50 ? content[..50] + "..." : content;
+        var firstSentenceEnd = title.IndexOfAny(['.', '?', '!', '\n']);
+        if (firstSentenceEnd > 0 && firstSentenceEnd < title.Length - 3)
+            title = title[..(firstSentenceEnd + 1)];
+        return title.Trim();
     }
 
     private async Task SaveAssistantMessageAsync(
@@ -307,7 +461,8 @@ public class MultiModalChatHandler(
             MetadataJson =
                 collector.ProjectionResult != null
                     ? JsonSerializer.Serialize(
-                        new { projectionResult = collector.ProjectionResult }
+                        new { projectionResult = collector.ProjectionResult },
+                        CamelCaseOptions
                     )
                     : null,
         };
@@ -319,59 +474,6 @@ public class MultiModalChatHandler(
             threadId,
             assistantMessage.Id
         );
-    }
-
-    private static MasterStreamingResponse? ValidateRequest(MultiModalChatRequest request)
-    {
-        if (request.Contents == null || request.Contents.Count == 0)
-        {
-            return new MasterStreamingResponse
-            {
-                Type = ResponseType.Error.ToString(),
-                Content = "Request must include at least one content item",
-                IsComplete = true,
-            };
-        }
-
-        foreach (var content in request.Contents)
-        {
-            var (isValid, errorMessage) = ContentConverter.ValidateContentInput(content);
-            if (!isValid)
-            {
-                return new MasterStreamingResponse
-                {
-                    Type = ResponseType.Error.ToString(),
-                    Content = errorMessage,
-                    IsComplete = true,
-                };
-            }
-        }
-
-        return null;
-    }
-
-    private async IAsyncEnumerable<ContentProcessResult> ProcessContentsAsync(
-        List<ContentInput> contents,
-        [EnumeratorCancellation] CancellationToken cancellationToken
-    )
-    {
-        foreach (var content in contents)
-        {
-            if (IsAudioContent(content))
-            {
-                var result = await ProcessAudioContentAsync(content);
-                yield return result;
-            }
-            else
-            {
-                var aiContent = ContentConverter.ConvertToAIContent(content);
-                if (aiContent != null)
-                {
-                    var description = GenerateContentDescription(content);
-                    yield return new ContentProcessResult(aiContent, Description: description);
-                }
-            }
-        }
     }
 
     private static string? GenerateContentDescription(ContentInput content)
@@ -394,7 +496,11 @@ public class MultiModalChatHandler(
         && !string.IsNullOrEmpty(content.MediaType)
         && AudioTranscriptionService.IsAudioFile(content.MediaType);
 
-    private async Task<ContentProcessResult> ProcessAudioContentAsync(ContentInput content)
+    private async Task<(
+        AIContent? content,
+        MasterStreamingResponse? response,
+        string? description
+    )> ProcessAudioContentAsync(ContentInput content)
     {
         var base64Data = ExtractBase64Data(content.Data!);
         var audioBytes = Convert.FromBase64String(base64Data);
@@ -418,7 +524,7 @@ public class MultiModalChatHandler(
         var textContent = new TextContent($"[Audio file '{fileName}' transcription]: {transcript}");
         var description = $"[Audio transcription '{fileName}']: {transcript}";
 
-        return new ContentProcessResult(textContent, transcriptionResponse, description);
+        return (textContent, transcriptionResponse, description);
     }
 
     private static string ExtractBase64Data(string data)
@@ -430,11 +536,38 @@ public class MultiModalChatHandler(
         return commaIndex >= 0 ? data[(commaIndex + 1)..] : data;
     }
 
-    private record ContentProcessResult(
-        AIContent? Content,
-        MasterStreamingResponse? Response = null,
-        string? Description = null
-    );
+    private static MasterStreamingResponse CreateErrorResponse(string message) =>
+        new()
+        {
+            Type = ResponseType.Error.ToString(),
+            Content = message,
+            IsComplete = true,
+        };
+
+    /// <summary>
+    /// Maps an orchestrator streaming chunk to a SignalR response.
+    /// </summary>
+    internal static MasterStreamingResponse MapChunkToStreamingResponse(
+        UnifiedStreamingChunk chunk
+    ) =>
+        new()
+        {
+            Type = chunk.Type.ToString(),
+            Content = chunk.Content,
+            SubAgentName = chunk.SubAgentName,
+            ToolName = chunk.ToolName,
+            IsComplete = chunk.Type == StreamingChunkType.Complete,
+            Metadata = chunk.Metadata,
+            StepId = chunk.StepId,
+            StepName = chunk.StepName,
+            StepNameAr = chunk.StepNameAr,
+            StepNumber = chunk.StepNumber,
+            TotalSteps = chunk.TotalSteps,
+            StepCompleted = chunk.Type == StreamingChunkType.StepComplete,
+            StepDurationMs = chunk.StepDurationMs,
+            StepDetails = chunk.StepDetails,
+            ProjectionResult = chunk.FinalResult?.ProjectionResult,
+        };
 
     private record ThreadContext(Guid ThreadId, List<ConversationMessage> PriorMessages);
 

@@ -37,12 +37,11 @@ export {
 // Re-export types from connection
 export type { DelegationEvent, WorkflowProgressEvent } from './connection';
 
-// Re-export streaming methods
-export {
-    chatStream,
-    chatStreamMultiModal,
-    chatStreamWithThread
-} from './streaming';
+// Re-export unified streaming method (single entry point for all chat types)
+export { chatStreamUnified } from './streaming';
+
+// Re-export types from streaming
+export type { UnifiedChatRequest } from './streaming';
 
 // Re-export REST API methods
 export {

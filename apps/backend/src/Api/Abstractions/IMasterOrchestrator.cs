@@ -41,6 +41,53 @@ public class ConversationMessage
     public required string Role { get; init; } // "user" or "assistant"
     public required string Content { get; init; }
     public string? SubAgentName { get; init; }
+
+    /// <summary>
+    /// Multimodal attachments (images, audio) for restoring full context.
+    /// Stored as serializable format for reconstruction as AIContent.
+    /// </summary>
+    public List<SerializableAttachment>? Attachments { get; init; }
+
+    /// <summary>
+    /// Check if this message has multimodal content
+    /// </summary>
+    public bool HasAttachments => Attachments?.Count > 0;
+}
+
+/// <summary>
+/// Serializable representation of multimodal attachments for database storage
+/// </summary>
+public class SerializableAttachment
+{
+    /// <summary>
+    /// Type of attachment: "image", "audio", "document"
+    /// </summary>
+    public required string Type { get; init; }
+
+    /// <summary>
+    /// MIME type (e.g., "image/jpeg", "audio/mp3")
+    /// </summary>
+    public required string MediaType { get; init; }
+
+    /// <summary>
+    /// Base64 encoded data (for images)
+    /// </summary>
+    public string? Data { get; init; }
+
+    /// <summary>
+    /// URL if the content is externally hosted
+    /// </summary>
+    public string? Url { get; init; }
+
+    /// <summary>
+    /// Original filename if available
+    /// </summary>
+    public string? FileName { get; init; }
+
+    /// <summary>
+    /// For audio: the transcription text
+    /// </summary>
+    public string? Transcription { get; init; }
 }
 
 /// <summary>

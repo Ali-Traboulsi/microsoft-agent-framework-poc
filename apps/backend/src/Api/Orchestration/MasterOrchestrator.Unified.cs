@@ -207,63 +207,44 @@ public partial class MasterOrchestrator
                 );
             }
 
-            // Process based on content type - stream the response
+            // Use Swarm pattern for ALL requests (text and multimodal)
+            // This ensures consistent conversation history and memory across message types
             if (request.HasMultiModalContent)
             {
                 // Extract transcription if available
                 transcription = ExtractTranscriptionFromContents(request.Contents!);
-
-                // Stream multi-modal response
-                await foreach (
-                    var chunk in StreamMultiModalAsync(
-                        request.Contents!,
-                        request.ConversationId,
-                        request.EnableThinking,
-                        effectiveCancellation
-                    )
-                )
-                {
-                    if (chunk.Content != null)
-                        fullResponse.Append(chunk.Content);
-                    if (chunk.SubAgentName != null && !subAgentsUsed.Contains(chunk.SubAgentName))
-                        subAgentsUsed.Add(chunk.SubAgentName);
-
-                    yield return chunk;
-                }
             }
-            else
+
+            _logger.LogInformation(
+                "Swarm execution for: {Intent}, classified agents: {Agents}, HasMultiModal: {HasMultiModal}",
+                classifiedIntent.PrimaryIntent,
+                string.Join(", ", classifiedIntent.RequiredSubAgents),
+                request.HasMultiModalContent
+            );
+
+            // Stream through Swarm with optional multimodal contents
+            await foreach (
+                var chunk in StreamSwarmAsync(
+                    message,
+                    classifiedIntent,
+                    request.ConversationId,
+                    request.EnableThinking,
+                    effectiveCancellation,
+                    request.Contents // Pass multimodal contents to Swarm
+                )
+            )
             {
-                // Use Swarm pattern for ALL text requests (single or multi-agent)
-                // The LLM naturally decides which sub-agents to call based on the request
-                // This replaces the complex composite/single agent branching logic
-                _logger.LogInformation(
-                    "Swarm execution for: {Intent}, classified agents: {Agents}",
-                    classifiedIntent.PrimaryIntent,
-                    string.Join(", ", classifiedIntent.RequiredSubAgents)
-                );
+                if (chunk.Content != null)
+                    fullResponse.Append(chunk.Content);
+                if (chunk.SubAgentName != null && !subAgentsUsed.Contains(chunk.SubAgentName))
+                    subAgentsUsed.Add(chunk.SubAgentName);
 
-                await foreach (
-                    var chunk in StreamSwarmAsync(
-                        message,
-                        classifiedIntent,
-                        request.ConversationId,
-                        request.EnableThinking,
-                        effectiveCancellation
-                    )
-                )
-                {
-                    if (chunk.Content != null)
-                        fullResponse.Append(chunk.Content);
-                    if (chunk.SubAgentName != null && !subAgentsUsed.Contains(chunk.SubAgentName))
-                        subAgentsUsed.Add(chunk.SubAgentName);
-
-                    yield return chunk;
-                }
-
-                subAgentsUsed.AddRange(
-                    classifiedIntent.RequiredSubAgents.Where(a => !subAgentsUsed.Contains(a))
-                );
+                yield return chunk;
             }
+
+            subAgentsUsed.AddRange(
+                classifiedIntent.RequiredSubAgents.Where(a => !subAgentsUsed.Contains(a))
+            );
 
             sw.Stop();
 

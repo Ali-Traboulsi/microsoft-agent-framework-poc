@@ -32,7 +32,12 @@ const MessageBubble: React.FC<{ msg: ChatMessage }> = ({ msg }) => {
         <ThinkingStepsDisplay steps={msg.thinkingSteps} />
       </div>
     );
-  } 
+  }
+
+  // Hide thinking messages that only have content (redundant with delegation events)
+  if (msg.type === 'thinking' && !msg.thinkingSteps) {
+    return null;
+  }
 
   // Special rendering for projection results
   if (msg.type === 'projection' && msg.projectionResult) {

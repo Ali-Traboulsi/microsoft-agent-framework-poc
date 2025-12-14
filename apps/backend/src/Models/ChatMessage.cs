@@ -50,6 +50,12 @@ public class ChatMessage
     public string? MetadataJson { get; set; }
 
     /// <summary>
+    /// Multimodal attachments stored as JSON (base64 images, audio transcriptions, etc.)
+    /// Allows reconstruction of full context when loading thread history
+    /// </summary>
+    public string? AttachmentsJson { get; set; }
+
+    /// <summary>
     /// Order of the message in the thread
     /// </summary>
     public int SequenceNumber { get; set; }

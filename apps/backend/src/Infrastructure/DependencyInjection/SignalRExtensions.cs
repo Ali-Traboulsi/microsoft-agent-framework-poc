@@ -44,10 +44,8 @@ public static class SignalRExtensions
     /// </summary>
     public static IServiceCollection AddSignalRHandlers(this IServiceCollection services)
     {
-        // SignalR Hub Handlers
-        services.AddScoped<IChatHandler, ChatStreamHandler>();
-        services.AddScoped<IMultiModalChatHandler, MultiModalChatHandler>();
-        services.AddScoped<IThreadedChatHandler, ThreadedChatHandler>();
+        // Unified chat handler - handles both text and multimodal with thread persistence
+        services.AddScoped<IUnifiedChatHandler, UnifiedChatHandler>();
 
         // Delegation Event Notifier (Singleton - pushes events via SignalR)
         services.AddSingleton<IDelegationEventNotifier, DelegationEventNotifier>();
