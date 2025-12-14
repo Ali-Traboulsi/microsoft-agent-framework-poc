@@ -461,13 +461,20 @@ export const MasterAgentChat: React.FC = () => {
       if (userMessage.trim()) contents.push({ Type: 'text' as const, Text: userMessage });
       contents.push(...fileContents);
 
-      for await (const chunk of chatStreamMultiModal(contents, conversationId.current, enableThinking)) {
+      for await (const chunk of chatStreamMultiModal(contents, conversationId.current, currentThreadId, enableThinking)) {
         if (chunk.isComplete) {
           setTelemetry(buildTelemetryData(ctx, chunk.metadata?.traceId as string));
           break;
         }
 
         switch (chunk.type) {
+          case 'ThreadCreated':
+            if (chunk.metadata?.threadId) {
+              setCurrentThreadId(chunk.metadata.threadId as string);
+              conversationId.current = chunk.metadata.threadId as string;
+            }
+            break;
+
           case 'Transcription':
             addMessage({ type: 'transcription', content: chunk.content || '', metadata: chunk.metadata || undefined });
             break;

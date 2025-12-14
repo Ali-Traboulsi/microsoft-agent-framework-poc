@@ -37,6 +37,7 @@ export async function* chatStream(
 export async function* chatStreamMultiModal(
   contents: ContentInput[],
   conversationId: string,
+  threadId: string | null,
   enableThinking: boolean = false
 ): AsyncGenerator<MasterStreamResponse> {
   const connection = await ensureConnected();
@@ -49,6 +50,7 @@ export async function* chatStreamMultiModal(
     Message: contents.find((c) => c.Type === 'text')?.Text || '',
     Contents: contents,
     ConversationId: conversationId,
+    ThreadId: threadId,
     EnableThinking: enableThinking,
   };
 

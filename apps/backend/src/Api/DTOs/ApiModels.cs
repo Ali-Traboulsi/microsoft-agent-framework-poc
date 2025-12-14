@@ -87,6 +87,11 @@ public record MultiModalChatRequest
     public string? ConversationId { get; set; }
 
     /// <summary>
+    /// Optional thread ID for persisting multi-modal messages to history
+    /// </summary>
+    public string? ThreadId { get; set; }
+
+    /// <summary>
     /// Enable extended reasoning mode (like ChatGPT o1)
     /// </summary>
     public bool EnableThinking { get; set; } = false;

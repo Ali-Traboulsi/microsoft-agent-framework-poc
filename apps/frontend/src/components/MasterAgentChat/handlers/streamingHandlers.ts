@@ -1,7 +1,7 @@
 import {
-    chatStreamMultiModal,
-    chatStreamWithThread,
-    type MasterStreamResponse,
+  chatStreamMultiModal,
+  chatStreamWithThread,
+  type MasterStreamResponse,
 } from '../../../services/masterAgent';
 import type { ChatMessage, ContentInput, ProjectionResult } from '../../../services/masterAgent/types';
 import type { UploadedFile } from '../../FileUpload';
@@ -272,6 +272,7 @@ export async function handleMultiModalChat(
     for await (const chunk of chatStreamMultiModal(
       contents,
       ctx.conversationId.current,
+      ctx.currentThreadId,
       ctx.enableThinking
     )) {
       if (chunk.isComplete) {
@@ -286,6 +287,13 @@ export async function handleMultiModalChat(
       }
 
       switch (chunk.type) {
+        case 'ThreadCreated':
+          if (chunk.metadata?.threadId) {
+            ctx.setCurrentThreadId(chunk.metadata.threadId as string);
+            ctx.conversationId.current = chunk.metadata.threadId as string;
+          }
+          break;
+
         case 'Transcription':
           ctx.addMessage({
             type: 'transcription',
