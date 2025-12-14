@@ -57,14 +57,42 @@ public class DelegationEventNotifier(IHubContext<MasterAgentHub> hubContext)
     private static string MapEventTypeToResponseType(DelegationEventType type) =>
         type switch
         {
+            // Sub-agent events
             DelegationEventType.SubAgentDelegationStart => "SubAgentDelegation",
             DelegationEventType.SubAgentDelegationComplete => "SubAgentComplete",
             DelegationEventType.SubAgentDelegationError => "SubAgentError",
+
+            // Tool events
             DelegationEventType.ToolExecutionStart => "ToolExecution",
             DelegationEventType.ToolExecutionComplete => "ToolComplete",
             DelegationEventType.ToolExecutionError => "ToolError",
+
+            // Workflow events
             DelegationEventType.WorkflowStepStart => "StepStart",
             DelegationEventType.WorkflowStepComplete => "StepComplete",
+
+            // Thinking/Transparency events
+            DelegationEventType.ThinkingStart => "ThinkingStart",
+            DelegationEventType.ThinkingProgress => "ThinkingProgress",
+            DelegationEventType.ThinkingComplete => "ThinkingComplete",
+
+            // Memory events
+            DelegationEventType.MemoryRetrievalStart => "MemoryRetrievalStart",
+            DelegationEventType.MemoryRetrievalComplete => "MemoryRetrievalComplete",
+            DelegationEventType.MemoryStorageStart => "MemoryStorageStart",
+            DelegationEventType.MemoryStorageComplete => "MemoryStorageComplete",
+
+            // Intent/Context events
+            DelegationEventType.IntentAnalysisStart => "IntentAnalysisStart",
+            DelegationEventType.IntentAnalysisComplete => "IntentAnalysisComplete",
+            DelegationEventType.ContextBuildingStart => "ContextBuildingStart",
+            DelegationEventType.ContextBuildingComplete => "ContextBuildingComplete",
+            DelegationEventType.HistoryProcessing => "HistoryProcessing",
+
+            // Reasoning events
+            DelegationEventType.ReasoningStep => "ReasoningStep",
+            DelegationEventType.GeneratingResponse => "GeneratingResponse",
+
             _ => "Unknown",
         };
 }

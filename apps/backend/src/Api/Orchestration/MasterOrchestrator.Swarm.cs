@@ -37,14 +37,35 @@ public partial class MasterOrchestrator
     {
         var history = GetOrCreateSwarmHistory(conversationId);
         var agentsUsed = new List<string>();
+        var startTime = DateTime.UtcNow;
+
+        // ===== Emit: Thinking Start =====
+        yield return CreateThinkingChunk("🧠 Processing your request...");
+        await EmitTransparencyEventAsync(
+            conversationId,
+            DelegationEventType.ThinkingStart,
+            "Processing request",
+            "Analyzing your message and preparing response"
+        );
 
         // ===== InvokingAsync Pattern: Retrieve long-term memory before processing =====
         LongTermMemoryContext? memoryContext = null;
+        var memoryRetrievalError = false;
+        var userId = ExtractUserIdFromConversationId(conversationId);
+
+        // Emit: Memory Retrieval Start (before try block)
+        yield return CreateThinkingChunk(
+            "📚 Retrieving your conversation history and preferences..."
+        );
+        await EmitTransparencyEventAsync(
+            conversationId,
+            DelegationEventType.MemoryRetrievalStart,
+            "Memory Retrieval",
+            "Loading long-term memory and past conversations"
+        );
+
         try
         {
-            // Extract userId from conversationId (format: userId_sessionId or just use conversationId as userId)
-            var userId = ExtractUserIdFromConversationId(conversationId);
-
             memoryContext = await _longTermMemoryProvider.RetrieveContextAsync(
                 userId,
                 userMessage,
@@ -68,6 +89,48 @@ public partial class MasterOrchestrator
                 ex,
                 "⚠️ Failed to load long-term memory for conversation {ConversationId}",
                 conversationId
+            );
+            memoryRetrievalError = true;
+        }
+
+        // Emit: Memory Retrieval Complete/Error (after try block)
+        if (enableThinking)
+        {
+            if (memoryRetrievalError)
+            {
+                yield return CreateThinkingChunk(
+                    "⚠️ Could not load memory context - proceeding without history"
+                );
+            }
+            else
+            {
+                var memoryDetails =
+                    memoryContext?.HasMemory == true
+                        ? $"Found {memoryContext.RelevantFacts.Count} relevant facts, {memoryContext.RelevantConversations.Count} past conversations"
+                        : "No previous context found - starting fresh";
+
+                yield return CreateThinkingChunk($"✅ {memoryDetails}");
+                await EmitTransparencyEventAsync(
+                    conversationId,
+                    DelegationEventType.MemoryRetrievalComplete,
+                    "Memory Retrieved",
+                    memoryDetails,
+                    (long)(DateTime.UtcNow - startTime).TotalMilliseconds
+                );
+            }
+        }
+
+        // Emit: History Processing
+        if (enableThinking && history.Messages.Count > 1)
+        {
+            yield return CreateThinkingChunk(
+                $"📝 Processing {history.Messages.Count} messages from current conversation..."
+            );
+            await EmitTransparencyEventAsync(
+                conversationId,
+                DelegationEventType.HistoryProcessing,
+                "History Processing",
+                $"Reviewing {history.Messages.Count} messages from current session"
             );
         }
 
@@ -93,6 +156,20 @@ public partial class MasterOrchestrator
             iterationCount++;
             cancellationToken.ThrowIfCancellationRequested();
 
+            // Emit: Context Building (first iteration only)
+            if (iterationCount == 1 && enableThinking)
+            {
+                yield return CreateThinkingChunk(
+                    "🔧 Building context with intent analysis and available tools..."
+                );
+                await EmitTransparencyEventAsync(
+                    conversationId,
+                    DelegationEventType.ContextBuildingStart,
+                    "Context Building",
+                    $"Intent: {intent.PrimaryIntent}, Confidence: {intent.Confidence:P0}"
+                );
+            }
+
             // Build system prompt with long-term memory context
             var systemPrompt = BuildSwarmSystemPromptWithMemory(intent, memoryContext);
             var messagesForModel = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
@@ -108,6 +185,29 @@ public partial class MasterOrchestrator
                 messagesForModel.Count,
                 tools.Count
             );
+
+            // Emit: Generating Response
+            if (enableThinking)
+            {
+                if (iterationCount == 1)
+                {
+                    yield return CreateThinkingChunk(
+                        $"🤖 Consulting AI with {tools.Count} available specialist agents..."
+                    );
+                    await EmitTransparencyEventAsync(
+                        conversationId,
+                        DelegationEventType.GeneratingResponse,
+                        "Generating Response",
+                        $"Sending request to AI with {tools.Count} tools available"
+                    );
+                }
+                else
+                {
+                    yield return CreateThinkingChunk(
+                        $"🔄 Processing results and determining next steps (iteration {iterationCount})..."
+                    );
+                }
+            }
 
             // Use STREAMING to get real-time response
             var streamedText = new StringBuilder();
@@ -328,25 +428,71 @@ public partial class MasterOrchestrator
                 history.Messages.Add(new ChatMessage(ChatRole.Assistant, responseText));
             }
 
+            var totalDurationMs = (long)(DateTime.UtcNow - startTime).TotalMilliseconds;
+
             _logger.LogInformation(
-                "✅ Swarm COMPLETE: {Iterations} iterations, agents: [{Agents}]",
+                "✅ Swarm COMPLETE: {Iterations} iterations, agents: [{Agents}], duration: {Duration}ms",
                 iterationCount,
-                string.Join(", ", agentsUsed)
+                string.Join(", ", agentsUsed),
+                totalDurationMs
             );
 
+            // Emit: Thinking Complete
+            if (enableThinking)
+            {
+                var agentSummary =
+                    agentsUsed.Count > 0
+                        ? $"Consulted: {string.Join(", ", agentsUsed)}"
+                        : "Direct response (no specialists needed)";
+
+                yield return CreateThinkingChunk($"✅ Response complete! {agentSummary}");
+                await EmitTransparencyEventAsync(
+                    conversationId,
+                    DelegationEventType.ThinkingComplete,
+                    "Processing Complete",
+                    agentSummary,
+                    totalDurationMs
+                );
+            }
+
             // ===== InvokedAsync Pattern: Store long-term memory after processing =====
-            var userId = ExtractUserIdFromConversationId(conversationId);
+            // Note: userId is already declared at the start of the method
             var capturedUserMessage = userMessage;
             var capturedResponse = finalResponse.ToString();
             var capturedAgentsUsed = agentsUsed.ToList();
             var capturedConversationId = conversationId;
+            var capturedEnableThinking = enableThinking;
+            var capturedUserId = userId;
+
+            // Emit: Memory Storage Start (if thinking enabled, emit before async task)
+            yield return CreateThinkingChunk("💾 Saving conversation to memory...");
+            await EmitTransparencyEventAsync(
+                conversationId,
+                DelegationEventType.MemoryStorageStart,
+                "Storing Memory",
+                "Extracting important information from this conversation"
+            );
 
             _ = Task.Run(async () =>
             {
                 try
                 {
+                    // First, persist the conversation entry to database (required for summary generation)
+                    await _subAgentThreadManager.AddMemoryAsync(
+                        capturedConversationId,
+                        "MasterAgent",
+                        capturedUserMessage,
+                        capturedResponse
+                    );
+
+                    _logger.LogDebug(
+                        "📝 Conversation entry persisted for conversation {ConversationId}",
+                        capturedConversationId
+                    );
+
+                    // Then extract and store long-term memories
                     await _longTermMemoryProvider.ProcessAndStoreMemoriesAsync(
-                        userId,
+                        capturedUserId,
                         capturedConversationId,
                         capturedUserMessage,
                         capturedResponse,
@@ -354,14 +500,32 @@ public partial class MasterOrchestrator
                         cancellationToken: CancellationToken.None
                     );
 
-                    _logger.LogDebug("🧠 Long-term memory stored for user {UserId}", userId);
+                    _logger.LogDebug(
+                        "🧠 Long-term memory stored for user {UserId}",
+                        capturedUserId
+                    );
+
+                    // Note: We can't yield from here, but we push to SignalR
+                    if (capturedEnableThinking)
+                    {
+                        await _delegationNotifier.NotifyAsync(
+                            capturedConversationId,
+                            new DelegationEvent
+                            {
+                                Type = DelegationEventType.MemoryStorageComplete,
+                                StepName = "Memory Stored",
+                                StepDetails = "Conversation saved to long-term memory",
+                                Timestamp = DateTime.UtcNow,
+                            }
+                        );
+                    }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(
                         ex,
                         "⚠️ Failed to store long-term memory for user {UserId}",
-                        userId
+                        capturedUserId
                     );
                 }
             });
@@ -876,6 +1040,52 @@ public partial class MasterOrchestrator
             history.Messages.AddRange(sanitizedMessages);
         }
     }
+
+    #region Transparency Event Helpers
+
+    /// <summary>
+    /// Create a thinking/transparency streaming chunk
+    /// </summary>
+    private static UnifiedStreamingChunk CreateThinkingChunk(string message) =>
+        new() { Type = StreamingChunkType.Thinking, Content = message + "\n" };
+
+    /// <summary>
+    /// Emit a transparency event via SignalR for real-time UI updates
+    /// </summary>
+    private async Task EmitTransparencyEventAsync(
+        string conversationId,
+        DelegationEventType eventType,
+        string stepName,
+        string details,
+        long? durationMs = null
+    )
+    {
+        try
+        {
+            await _delegationNotifier.NotifyAsync(
+                conversationId,
+                new DelegationEvent
+                {
+                    Type = eventType,
+                    StepName = stepName,
+                    StepDetails = details,
+                    StepDurationMs = durationMs,
+                    Timestamp = DateTime.UtcNow,
+                }
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to emit transparency event {EventType} for conversation {ConversationId}",
+                eventType,
+                conversationId
+            );
+        }
+    }
+
+    #endregion
 }
 
 /// <summary>

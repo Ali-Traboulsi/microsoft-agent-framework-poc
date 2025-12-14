@@ -344,13 +344,61 @@ public class DelegationEvent
 /// </summary>
 public enum DelegationEventType
 {
+    // Sub-agent delegation events
     SubAgentDelegationStart,
     SubAgentDelegationComplete,
     SubAgentDelegationError,
+
+    // Tool execution events
     ToolExecutionStart,
     ToolExecutionComplete,
     ToolExecutionError,
+
+    // Workflow events
     WorkflowStepStart,
     WorkflowStepComplete,
     WorkflowProgress,
+
+    // === NEW: Transparency/Thinking Events ===
+    /// <summary>Agent is beginning to process a request</summary>
+    ThinkingStart,
+
+    /// <summary>Agent reasoning/thinking progress update</summary>
+    ThinkingProgress,
+
+    /// <summary>Agent finished thinking phase</summary>
+    ThinkingComplete,
+
+    /// <summary>Retrieving long-term memory context</summary>
+    MemoryRetrievalStart,
+
+    /// <summary>Long-term memory retrieval completed</summary>
+    MemoryRetrievalComplete,
+
+    /// <summary>Analyzing user intent</summary>
+    IntentAnalysisStart,
+
+    /// <summary>Intent analysis completed</summary>
+    IntentAnalysisComplete,
+
+    /// <summary>Building context/prompt for the model</summary>
+    ContextBuildingStart,
+
+    /// <summary>Context building completed</summary>
+    ContextBuildingComplete,
+
+    /// <summary>Processing conversation history</summary>
+    HistoryProcessing,
+
+    /// <summary>Summarizing or storing conversation</summary>
+    MemoryStorageStart,
+
+    /// <summary>Memory storage completed</summary>
+    MemoryStorageComplete,
+
+    /// <summary>A reasoning step in chain-of-thought</summary>
+    ReasoningStep,
+
+    /// <summary>Model is generating a response</summary>
+    GeneratingResponse,
 }

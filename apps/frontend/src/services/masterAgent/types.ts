@@ -193,6 +193,19 @@ export interface ToolCallInfo {
   error?: string;
 }
 
+/**
+ * Represents a thinking/transparency step from the agent
+ */
+export interface ThinkingStep {
+  id: string;
+  type: string;
+  emoji: string;
+  label: string;
+  details: string;
+  timestamp: Date;
+  durationMs?: number;
+}
+
 export interface ChatMessage {
   id: string;
   type: 'user' | 'agent' | 'thinking' | 'reasoning' | 'delegation' | 'tool' | 'telemetry' | 'multimodal' | 'transcription' | 'projection' | 'workflow-progress' | 'tool-calls';
@@ -205,6 +218,7 @@ export interface ChatMessage {
   projectionResult?: ProjectionResult; // For structured projection data
   workflowSteps?: WorkflowStep[]; // For workflow progress tracking
   toolCalls?: ToolCallInfo[]; // For consolidated tool call display
+  thinkingSteps?: ThinkingStep[]; // For transparency/thinking step display
 }
 
 export interface TelemetryData {

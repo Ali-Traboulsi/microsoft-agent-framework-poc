@@ -1,3 +1,5 @@
+using AgentFrameworkQuickStart.Core.Interfaces;
+
 namespace AgentFrameworkQuickStart.Core.Domain.Memory;
 
 /// <summary>
@@ -37,9 +39,15 @@ public class LongTermMemoryContext
     public List<string> PendingFollowUps { get; set; } = [];
 
     /// <summary>
+    /// Recent conversation turns from the current session (for immediate context)
+    /// </summary>
+    public List<MemoryConversationTurn> RecentTurns { get; set; } = [];
+
+    /// <summary>
     /// Whether any long-term memory was found
     /// </summary>
-    public bool HasMemory => UserMemory != null || RelevantConversations.Count > 0;
+    public bool HasMemory =>
+        UserMemory != null || RelevantConversations.Count > 0 || RecentTurns.Count > 0;
 
     /// <summary>
     /// Total tokens estimated for context injection
@@ -142,4 +150,20 @@ public class MemoryRetrievalSettings
     /// Whether to include multi-modal references
     /// </summary>
     public bool IncludeMultiModal { get; set; } = true;
+
+    /// <summary>
+    /// Maximum number of recent conversation turns to include
+    /// </summary>
+    public int MaxRecentTurns { get; set; } = 5;
+}
+
+/// <summary>
+/// Represents a single turn in the current conversation (for memory context)
+/// </summary>
+public class MemoryConversationTurn
+{
+    public int SequenceNumber { get; set; }
+    public string UserRequest { get; set; } = string.Empty;
+    public string AgentResponse { get; set; } = string.Empty;
+    public DateTime Timestamp { get; set; }
 }

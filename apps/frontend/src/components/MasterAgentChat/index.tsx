@@ -14,6 +14,7 @@ import {
 } from '../../services/masterAgent';
 import { ChatMessage, TelemetryData } from '../../services/masterAgent/types';
 import { ChatThread, getThread, ThreadMessage } from '../../services/threads';
+import { generateUUID } from '../../utils/uuid';
 import { WorkflowStep } from '../Cards/WorkflowProgressCard';
 import { UploadedFile } from '../FileUpload';
 import { ChatMessages } from './components';
@@ -56,7 +57,7 @@ export const MasterAgentChat: React.FC = () => {
   
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const conversationId = useRef(`conv-${Date.now()}`);
+  const conversationId = useRef(generateUUID());
   const workflowProgressMessageIdRef = useRef<string | null>(null);
 
   // Auto-scroll on new messages
@@ -328,7 +329,7 @@ export const MasterAgentChat: React.FC = () => {
       setCurrentThreadId(null);
       setMessages([]);
       setTelemetry({});
-      conversationId.current = `conv-${Date.now()}`;
+      conversationId.current = generateUUID();
       return;
     }
 
@@ -356,7 +357,7 @@ export const MasterAgentChat: React.FC = () => {
     setCurrentThreadId(null);
     setMessages([]);
     setTelemetry({});
-    conversationId.current = `conv-${Date.now()}`;
+    conversationId.current = generateUUID();
   }, []);
 
   // Streaming chat handler

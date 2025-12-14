@@ -1,6 +1,8 @@
 using System.Text;
 using AgentFrameworkQuickStart.Core.Domain.Memory;
 using AgentFrameworkQuickStart.Core.Interfaces;
+using AgentFrameworkQuickStart.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace AgentFrameworkQuickStart.Services.Memory;
 
@@ -13,6 +15,7 @@ public class LongTermMemoryProvider(
     IUserMemoryRepository userMemoryRepository,
     IConversationSummaryRepository conversationSummaryRepository,
     IMemoryExtractionService memoryExtractionService,
+    IServiceScopeFactory scopeFactory,
     ILogger<LongTermMemoryProvider> logger
 ) : ILongTermMemoryProvider
 {
@@ -78,15 +81,23 @@ public class LongTermMemoryProvider(
                 .Take(5)
                 .ToList();
 
-            // 4. Format the context
+            // 4. Load recent conversation turns from current session
+            context.RecentTurns = await LoadRecentTurnsAsync(
+                conversationId,
+                settings.MaxRecentTurns,
+                cancellationToken
+            );
+
+            // 5. Format the context
             context.FormattedContext = FormatContextForInjection(context);
             context.EstimatedTokens = EstimateTokenCount(context.FormattedContext);
 
             logger.LogInformation(
-                "Retrieved long-term memory for user {UserId}: {FactCount} facts, {ConversationCount} relevant conversations, {FollowUpCount} follow-ups",
+                "Retrieved long-term memory for user {UserId}: {FactCount} facts, {ConversationCount} relevant conversations, {TurnCount} recent turns, {FollowUpCount} follow-ups",
                 userId,
                 context.RelevantFacts.Count,
                 context.RelevantConversations.Count,
+                context.RecentTurns.Count,
                 context.PendingFollowUps.Count
             );
 
@@ -319,10 +330,79 @@ public class LongTermMemoryProvider(
             sb.AppendLine();
         }
 
+        // Recent conversation turns (current session history)
+        if (context.RecentTurns.Count > 0)
+        {
+            sb.AppendLine("## Recent Conversation History (Current Session)");
+            sb.AppendLine(
+                "Use this context to understand what was previously discussed in this conversation:"
+            );
+            sb.AppendLine();
+            foreach (var turn in context.RecentTurns.OrderBy(t => t.SequenceNumber))
+            {
+                sb.AppendLine($"### Turn {turn.SequenceNumber}");
+                sb.AppendLine($"**User:** {TruncateIfNeeded(turn.UserRequest, 500)}");
+                sb.AppendLine($"**Agent:** {TruncateIfNeeded(turn.AgentResponse, 1000)}");
+                sb.AppendLine();
+            }
+        }
+
         sb.AppendLine("=== END LONG-TERM MEMORY ===");
         sb.AppendLine();
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Load recent conversation turns from the database for the current conversation
+    /// </summary>
+    private async Task<List<MemoryConversationTurn>> LoadRecentTurnsAsync(
+        string conversationId,
+        int maxTurns,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!Guid.TryParse(conversationId, out var conversationGuid))
+            return [];
+
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            var entries = await dbContext
+                .ConversationMemoryEntries.Where(e => e.ConversationId == conversationGuid)
+                .OrderByDescending(e => e.SequenceNumber)
+                .Take(maxTurns)
+                .ToListAsync(cancellationToken);
+
+            return entries
+                .Select(e => new MemoryConversationTurn
+                {
+                    SequenceNumber = e.SequenceNumber,
+                    UserRequest = e.UserRequest,
+                    AgentResponse = e.AgentResponse,
+                    Timestamp = e.Timestamp,
+                })
+                .OrderBy(t => t.SequenceNumber)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to load recent turns for conversation {ConversationId}",
+                conversationId
+            );
+            return [];
+        }
+    }
+
+    private static string TruncateIfNeeded(string text, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= maxLength)
+            return text;
+        return text[..(maxLength - 3)] + "...";
     }
 
     /// <inheritdoc/>

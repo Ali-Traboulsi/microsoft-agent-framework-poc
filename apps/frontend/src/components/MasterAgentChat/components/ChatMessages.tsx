@@ -5,6 +5,7 @@ import { ToolCallCard } from '../../Cards/ToolCallCard';
 import { WorkflowProgressCard } from '../../Cards/WorkflowProgressCard';
 import { MessageContent } from '../../MessageContent';
 import { getMessageBubbleStyle, getMessageIcon, getMessageLabel } from '../utils';
+import { ThinkingStepsDisplay } from './ThinkingStepsDisplay';
 
 interface ChatMessagesProps {
   messages: ChatMessage[];
@@ -24,6 +25,15 @@ const StreamingIndicator: React.FC = () => (
 );
 
 const MessageBubble: React.FC<{ msg: ChatMessage }> = ({ msg }) => {
+  // Special rendering for thinking messages with steps - minimalistic outside bubble
+  if ((msg.type === 'thinking' || msg.type === 'reasoning') && msg.thinkingSteps && msg.thinkingSteps.length > 0) {
+    return (
+      <div className="w-full max-w-4xl">
+        <ThinkingStepsDisplay steps={msg.thinkingSteps} />
+      </div>
+    );
+  } 
+
   // Special rendering for projection results
   if (msg.type === 'projection' && msg.projectionResult) {
     return (

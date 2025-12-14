@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { ChatMessage, ProjectionResult } from '../../../services/masterAgent/types';
 import { getThread, type ChatThread, type ThreadMessage } from '../../../services/threads';
+import { generateUUID } from '../../../utils/uuid';
 
 export interface ThreadManagementHook {
   currentThreadId: string | null;
@@ -20,7 +21,7 @@ export function useThreadManagement(
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [_selectedThread, setSelectedThread] = useState<ChatThread | null>(null);
   const [threadRefreshTrigger, setThreadRefreshTrigger] = useState(0);
-  const conversationId = useRef(`conv-${Date.now()}`);
+  const conversationId = useRef(generateUUID());
 
   const convertThreadMessagesToChatMessages = useCallback(
     (threadMessages: ThreadMessage[]): ChatMessage[] => {
@@ -66,7 +67,7 @@ export function useThreadManagement(
         setCurrentThreadId(null);
         setMessages([]);
         setTelemetry({});
-        conversationId.current = `conv-${Date.now()}`;
+        conversationId.current = generateUUID();
         return;
       }
 
@@ -100,7 +101,7 @@ export function useThreadManagement(
     setCurrentThreadId(null);
     setMessages([]);
     setTelemetry({});
-    conversationId.current = `conv-${Date.now()}`;
+    conversationId.current = generateUUID();
   }, [setMessages, setTelemetry]);
 
   const triggerThreadRefresh = useCallback(() => {
