@@ -9,4 +9,4 @@
 |       | 🟢 P2 | Error Recovery Framework | Medium | Medium |
 |       | 🟢 P2 | Dynamic Instruction Loading | Medium | Medium |
 |       | 🔵 P3 | User Memory & Personalization | Medium | High |
-|       | 🔵 P3 | Confidence-Based Responses | Low | Low |
+|       | 🔵 P3 | Confidence-Based Responses | Low | Low |  

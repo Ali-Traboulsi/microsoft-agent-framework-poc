@@ -60,6 +60,9 @@ builder.Services.AddOrchestration();
 // ===== Intelligence Layer (P0 + P1) =====
 builder.Services.AddIntelligenceLayer();
 
+// ===== Long-Term Memory =====
+builder.Services.AddLongTermMemory();
+
 // Add CORS
 builder.Services.AddCors(options =>
 {

@@ -4,6 +4,7 @@ using System.Text.Json;
 using AgentFrameworkQuickStart.Api.Abstractions;
 using AgentFrameworkQuickStart.Api.Middleware;
 using AgentFrameworkQuickStart.Core.Domain.Intelligence;
+using AgentFrameworkQuickStart.Core.Domain.Memory;
 using Microsoft.Extensions.AI;
 
 namespace AgentFrameworkQuickStart.Api.Orchestration;
@@ -24,6 +25,7 @@ public partial class MasterOrchestrator
     /// This is the ONLY execution path for text requests.
     /// The LLM sees the full conversation history and decides what to do.
     /// Uses streaming for real-time response delivery.
+    /// Implements AIContextProvider pattern: InvokingAsync (retrieve) + InvokedAsync (store)
     /// </summary>
     private async IAsyncEnumerable<UnifiedStreamingChunk> StreamSwarmAsync(
         string userMessage,
@@ -35,6 +37,39 @@ public partial class MasterOrchestrator
     {
         var history = GetOrCreateSwarmHistory(conversationId);
         var agentsUsed = new List<string>();
+
+        // ===== InvokingAsync Pattern: Retrieve long-term memory before processing =====
+        LongTermMemoryContext? memoryContext = null;
+        try
+        {
+            // Extract userId from conversationId (format: userId_sessionId or just use conversationId as userId)
+            var userId = ExtractUserIdFromConversationId(conversationId);
+
+            memoryContext = await _longTermMemoryProvider.RetrieveContextAsync(
+                userId,
+                userMessage,
+                conversationId,
+                cancellationToken: cancellationToken
+            );
+
+            if (memoryContext != null && memoryContext.HasMemory)
+            {
+                _logger.LogInformation(
+                    "🧠 Long-term memory loaded: {FactCount} facts, {ConversationCount} conversations for user {UserId}",
+                    memoryContext.RelevantFacts.Count,
+                    memoryContext.RelevantConversations.Count,
+                    userId
+                );
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "⚠️ Failed to load long-term memory for conversation {ConversationId}",
+                conversationId
+            );
+        }
 
         // Add user message to history
         history.Messages.Add(new ChatMessage(ChatRole.User, userMessage));
@@ -51,14 +86,15 @@ public partial class MasterOrchestrator
 
         var iterationCount = 0;
         const int maxIterations = 10;
+        var finalResponse = new StringBuilder();
 
         while (iterationCount < maxIterations)
         {
             iterationCount++;
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Build system prompt and messages
-            var systemPrompt = BuildSwarmSystemPrompt(intent);
+            // Build system prompt with long-term memory context
+            var systemPrompt = BuildSwarmSystemPromptWithMemory(intent, memoryContext);
             var messagesForModel = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
             messagesForModel.AddRange(history.Messages);
 
@@ -284,9 +320,12 @@ public partial class MasterOrchestrator
             }
 
             // No tool calls - we're done
-            if (streamedText.Length > 0)
+            var responseText = streamedText.ToString();
+            finalResponse.Append(responseText);
+
+            if (responseText.Length > 0)
             {
-                history.Messages.Add(new ChatMessage(ChatRole.Assistant, streamedText.ToString()));
+                history.Messages.Add(new ChatMessage(ChatRole.Assistant, responseText));
             }
 
             _logger.LogInformation(
@@ -294,6 +333,38 @@ public partial class MasterOrchestrator
                 iterationCount,
                 string.Join(", ", agentsUsed)
             );
+
+            // ===== InvokedAsync Pattern: Store long-term memory after processing =====
+            var userId = ExtractUserIdFromConversationId(conversationId);
+            var capturedUserMessage = userMessage;
+            var capturedResponse = finalResponse.ToString();
+            var capturedAgentsUsed = agentsUsed.ToList();
+            var capturedConversationId = conversationId;
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _longTermMemoryProvider.ProcessAndStoreMemoriesAsync(
+                        userId,
+                        capturedConversationId,
+                        capturedUserMessage,
+                        capturedResponse,
+                        capturedAgentsUsed,
+                        cancellationToken: CancellationToken.None
+                    );
+
+                    _logger.LogDebug("🧠 Long-term memory stored for user {UserId}", userId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "⚠️ Failed to store long-term memory for user {UserId}",
+                        userId
+                    );
+                }
+            });
 
             yield break;
         }
@@ -305,6 +376,109 @@ public partial class MasterOrchestrator
             Type = StreamingChunkType.Content,
             Content = "I apologize, but I couldn't complete your request. Please try again.",
         };
+    }
+
+    /// <summary>
+    /// Build system prompt for Swarm execution with long-term memory context
+    /// </summary>
+    private string BuildSwarmSystemPromptWithMemory(
+        UserIntent intent,
+        LongTermMemoryContext? memoryContext
+    )
+    {
+        var basePrompt = BuildSwarmSystemPrompt(intent);
+
+        if (memoryContext == null || !memoryContext.HasMemory)
+        {
+            return basePrompt;
+        }
+
+        // Use the pre-formatted context from the memory provider
+        if (!string.IsNullOrEmpty(memoryContext.FormattedContext))
+        {
+            return basePrompt
+                + "\n\n"
+                + memoryContext.FormattedContext
+                + "\n\nUse this context to provide personalized responses. Refer to remembered preferences and past interactions when relevant.";
+        }
+
+        // Fallback: Build memory section manually
+        var memorySection = new StringBuilder();
+        memorySection.AppendLine("\n\n===== LONG-TERM MEMORY (from previous sessions) =====");
+
+        // Add user preferences
+        if (memoryContext.UserMemory?.Preferences.Count > 0)
+        {
+            memorySection.AppendLine("\n**User Preferences:**");
+            foreach (var pref in memoryContext.UserMemory.Preferences.Take(5))
+            {
+                memorySection.AppendLine($"- {pref.Key}: {pref.Value.Value}");
+            }
+        }
+
+        // Add known user facts
+        if (memoryContext.RelevantFacts.Count > 0)
+        {
+            memorySection.AppendLine("\n**Known User Information:**");
+            foreach (var fact in memoryContext.RelevantFacts.Take(5))
+            {
+                memorySection.AppendLine($"- {fact.Fact}");
+            }
+        }
+
+        // Add relevant entities
+        if (memoryContext.RelevantEntities.Count > 0)
+        {
+            memorySection.AppendLine("\n**Frequently Referenced:**");
+            foreach (var entity in memoryContext.RelevantEntities.Take(5))
+            {
+                memorySection.AppendLine($"- {entity.DisplayName ?? entity.EntityId}");
+            }
+        }
+
+        // Add recent conversation context
+        if (memoryContext.RelevantConversations.Count > 0)
+        {
+            memorySection.AppendLine("\n**Recent Conversation History:**");
+            foreach (var summary in memoryContext.RelevantConversations.Take(3))
+            {
+                memorySection.AppendLine($"- {summary.Summary}");
+            }
+        }
+
+        // Add pending follow-ups
+        if (memoryContext.PendingFollowUps.Count > 0)
+        {
+            memorySection.AppendLine("\n**Pending Follow-ups:**");
+            foreach (var followUp in memoryContext.PendingFollowUps.Take(3))
+            {
+                memorySection.AppendLine($"- {followUp}");
+            }
+        }
+
+        memorySection.AppendLine("\n===== END LONG-TERM MEMORY =====");
+        memorySection.AppendLine(
+            "\nUse this context to provide personalized responses. Refer to remembered preferences and past interactions when relevant."
+        );
+
+        return basePrompt + memorySection.ToString();
+    }
+
+    /// <summary>
+    /// Extract userId from conversationId.
+    /// ConversationId format can be: userId_sessionId or just a unique identifier
+    /// </summary>
+    private static string ExtractUserIdFromConversationId(string conversationId)
+    {
+        // If conversationId contains underscore, assume format is userId_sessionId
+        var underscoreIndex = conversationId.IndexOf('_');
+        if (underscoreIndex > 0)
+        {
+            return conversationId[..underscoreIndex];
+        }
+
+        // Otherwise use the full conversationId as userId (anonymous user)
+        return conversationId;
     }
 
     /// <summary>

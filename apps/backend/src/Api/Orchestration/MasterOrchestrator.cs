@@ -53,6 +53,9 @@ public partial class MasterOrchestrator : IMasterOrchestrator
     private readonly FastIntentMatcher _fastIntentMatcher;
     private readonly ReasoningEngine _reasoningEngine;
 
+    // Long-term memory (persistent knowledge across sessions)
+    private readonly ILongTermMemoryProvider _longTermMemoryProvider;
+
     // Real-time delegation event notifier for UI updates
     private readonly IDelegationEventNotifier _delegationNotifier;
 
@@ -81,7 +84,8 @@ public partial class MasterOrchestrator : IMasterOrchestrator
         IConversationContextStore contextStore,
         FastIntentMatcher fastIntentMatcher,
         ReasoningEngine reasoningEngine,
-        IDelegationEventNotifier delegationNotifier
+        IDelegationEventNotifier delegationNotifier,
+        ILongTermMemoryProvider longTermMemoryProvider
     )
     {
         _chatClient = chatClient;
@@ -97,6 +101,7 @@ public partial class MasterOrchestrator : IMasterOrchestrator
         _fastIntentMatcher = fastIntentMatcher;
         _reasoningEngine = reasoningEngine;
         _delegationNotifier = delegationNotifier;
+        _longTermMemoryProvider = longTermMemoryProvider;
         _subAgentLookup = subAgents.ToDictionary(sa => sa.Name, sa => sa);
         _masterAgent = new Lazy<AIAgent>(CreateMasterAgentWithMiddleware);
     }

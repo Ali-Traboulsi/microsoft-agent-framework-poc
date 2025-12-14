@@ -18,6 +18,11 @@ public class AppDbContext : DbContext
     public DbSet<ConversationContextEntity> ConversationContexts =>
         Set<ConversationContextEntity>();
 
+    // Long-term memory tables
+    public DbSet<UserMemoryEntity> UserMemories => Set<UserMemoryEntity>();
+    public DbSet<ConversationSummaryEntity> ConversationSummaries =>
+        Set<ConversationSummaryEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -106,6 +111,67 @@ public class AppDbContext : DbContext
             entity.HasIndex(e => e.ConversationId).IsUnique();
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.LastActivityAt);
+
+            // Optional relationship with ChatThread
+            entity
+                .HasOne(e => e.Thread)
+                .WithMany()
+                .HasForeignKey(e => e.ThreadId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // Configure UserMemoryEntity
+        modelBuilder.Entity<UserMemoryEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.UserId).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.PreferredLanguage).HasMaxLength(10);
+            entity.Property(e => e.ExpertiseLevel).HasMaxLength(20);
+            entity.Property(e => e.RiskTolerance).HasMaxLength(20);
+
+            // JSON columns
+            entity.Property(e => e.FrequentAccountsJson).HasColumnType("TEXT");
+            entity.Property(e => e.FrequentPortfoliosJson).HasColumnType("TEXT");
+            entity.Property(e => e.FrequentFundsJson).HasColumnType("TEXT");
+            entity.Property(e => e.PreferencesJson).HasColumnType("TEXT");
+            entity.Property(e => e.FactsJson).HasColumnType("TEXT");
+            entity.Property(e => e.InterestsJson).HasColumnType("TEXT");
+            entity.Property(e => e.TopicFrequencyJson).HasColumnType("TEXT");
+            entity.Property(e => e.CommunicationStyleJson).HasColumnType("TEXT");
+
+            // Indexes
+            entity.HasIndex(e => e.UserId).IsUnique();
+            entity.HasIndex(e => e.UpdatedAt);
+        });
+
+        // Configure ConversationSummaryEntity
+        modelBuilder.Entity<ConversationSummaryEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.ConversationId).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.UserId).HasMaxLength(100);
+            entity.Property(e => e.Title).IsRequired().HasMaxLength(500);
+            entity.Property(e => e.Summary).IsRequired();
+            entity.Property(e => e.SatisfactionIndicator).HasMaxLength(50);
+
+            // JSON columns
+            entity.Property(e => e.TopicsJson).HasColumnType("TEXT");
+            entity.Property(e => e.EntitiesJson).HasColumnType("TEXT");
+            entity.Property(e => e.ActionsJson).HasColumnType("TEXT");
+            entity.Property(e => e.DecisionsJson).HasColumnType("TEXT");
+            entity.Property(e => e.PendingFollowUpsJson).HasColumnType("TEXT");
+            entity.Property(e => e.SubAgentsUsedJson).HasColumnType("TEXT");
+            entity.Property(e => e.MultiModalContentJson).HasColumnType("TEXT");
+            entity.Property(e => e.KeywordsJson).HasColumnType("TEXT");
+
+            // Indexes
+            entity.HasIndex(e => e.ConversationId).IsUnique();
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.ImportanceScore);
+            entity.HasIndex(e => e.StartedAt);
+            entity.HasIndex(e => e.CreatedAt);
 
             // Optional relationship with ChatThread
             entity
