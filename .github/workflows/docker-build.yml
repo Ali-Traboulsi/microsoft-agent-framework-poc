@@ -79,15 +79,16 @@ jobs:
 
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
-      RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_BACKEND_SERVICE_ID }}
 
     steps:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
       - name: Redeploy backend
-        run: railway redeploy
+        run: |
+          railway redeploy \
+            --project ${{ secrets.RAILWAY_PROJECT_ID }} \
+            --service ${{ secrets.RAILWAY_BACKEND_SERVICE_ID }}
 
 
   deploy-frontend:
@@ -96,12 +97,13 @@ jobs:
 
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
-      RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_FRONTEND_SERVICE_ID }}
 
     steps:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
       - name: Redeploy frontend
-        run: railway redeploy
+        run: |
+          railway redeploy \
+            --project ${{ secrets.RAILWAY_PROJECT_ID }} \
+            --service ${{ secrets.RAILWAY_FRONTEND_SERVICE_ID }}
