@@ -1,7 +1,6 @@
 import {
-  chatStreamMultiModal,
-  chatStreamWithThread,
   type MasterStreamResponse,
+  chatStreamUnified,
 } from '../../../services/masterAgent';
 import type { ChatMessage, ContentInput, ProjectionResult } from '../../../services/masterAgent/types';
 import type { UploadedFile } from '../../FileUpload';
@@ -140,12 +139,12 @@ export async function handleStreamingChat(
   ctx.setIsStreaming(true);
 
   try {
-    for await (const chunk of chatStreamWithThread(
-      userMessage,
-      ctx.currentThreadId,
-      ctx.conversationId.current,
-      ctx.enableThinking
-    )) {
+    for await (const chunk of chatStreamUnified({
+      message: userMessage,
+      threadId: ctx.currentThreadId,
+      conversationId: ctx.conversationId.current,
+      enableThinking: ctx.enableThinking,
+    })) {
       // Handle thread creation
       if (chunk.type === 'ThreadCreated' && chunk.metadata?.threadId) {
         const newThreadId = chunk.metadata.threadId as string;
@@ -269,12 +268,13 @@ export async function handleMultiModalChat(
     }
     contents.push(...fileContents);
 
-    for await (const chunk of chatStreamMultiModal(
+    for await (const chunk of chatStreamUnified({
+      message: userMessage.trim() || undefined,
       contents,
-      ctx.conversationId.current,
-      ctx.currentThreadId,
-      ctx.enableThinking
-    )) {
+      threadId: ctx.currentThreadId,
+      conversationId: ctx.conversationId.current,
+      enableThinking: ctx.enableThinking,
+    })) {
       if (chunk.isComplete) {
         const duration = Date.now() - requestStart;
         ctx.setTelemetry({
