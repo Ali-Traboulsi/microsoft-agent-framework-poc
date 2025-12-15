@@ -86,9 +86,7 @@ jobs:
 
       - name: Redeploy backend
         run: |
-          railway redeploy \
-            --project ${{ secrets.RAILWAY_PROJECT_ID }} \
-            --service ${{ secrets.RAILWAY_BACKEND_SERVICE_ID }}
+          railway redeploy -s ${{ secrets.RAILWAY_BACKEND_SERVICE_ID }}
 
 
   deploy-frontend:
@@ -104,6 +102,4 @@ jobs:
 
       - name: Redeploy frontend
         run: |
-          railway redeploy \
-            --project ${{ secrets.RAILWAY_PROJECT_ID }} \
-            --service ${{ secrets.RAILWAY_FRONTEND_SERVICE_ID }}
+          railway redeploy -s ${{ secrets.RAILWAY_FRONTEND_SERVICE_ID }}
